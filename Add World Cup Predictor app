@@ -37,6 +37,7 @@ const WorldCup2026Predictor = () => {
   const [specialPredictions, setSpecialPredictions] = useState({});
   const [tournamentStarted, setTournamentStarted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [liveLeaderboardMode, setLiveLeaderboardMode] = useState(false);
 
   const groupMatches = [
     // Group A
@@ -150,7 +151,7 @@ const WorldCup2026Predictor = () => {
       return;
     }
 
-    if (newPlayerName.trim() && players.length < 9) {
+    if (newPlayerName.trim()) {
       const newPlayer = { 
         id: Date.now().toString(), 
         name: newPlayerName 
@@ -256,6 +257,61 @@ const WorldCup2026Predictor = () => {
     );
   }
 
+  // Live Leaderboard Full-Screen Mode
+  if (liveLeaderboardMode) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-green-800 p-8">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-8">
+            <h1 className="text-6xl font-bold text-white mb-4">🏆 LIVE LEADERBOARD 🏆</h1>
+            <p className="text-2xl text-blue-100">FIFA World Cup 2026 Predictions</p>
+          </div>
+
+          <div className="bg-white/98 rounded-3xl p-12 shadow-2xl">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b-4 border-blue-900">
+                    <th className="px-8 py-6 text-left text-blue-900 font-bold text-4xl">Rank</th>
+                    <th className="px-8 py-6 text-left text-blue-900 font-bold text-4xl">Player</th>
+                    <th className="px-8 py-6 text-right text-blue-900 font-bold text-4xl">Points</th>
+                    <th className="px-8 py-6 text-right text-blue-900 font-bold text-4xl">Correct</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {calculateScores().map((score, idx) => (
+                    <tr 
+                      key={idx} 
+                      className={`border-b-2 border-blue-200 ${
+                        idx === 0 ? 'bg-yellow-100' : idx === 1 ? 'bg-gray-100' : idx === 2 ? 'bg-orange-100' : 'bg-white'
+                      }`}
+                    >
+                      <td className="px-8 py-8 font-bold text-blue-900 text-5xl">
+                        {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
+                      </td>
+                      <td className="px-8 py-8 font-bold text-blue-900 text-4xl">{score.name}</td>
+                      <td className="px-8 py-8 text-right text-5xl font-bold text-green-600">{score.points}</td>
+                      <td className="px-8 py-8 text-right text-4xl text-blue-900">{score.correctPredictions}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="text-center mt-8">
+            <button
+              onClick={() => setLiveLeaderboardMode(false)}
+              className="px-8 py-4 bg-red-500 text-white text-2xl font-bold rounded-lg hover:bg-red-600"
+            >
+              ✕ Exit Live Mode
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-green-800 p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
@@ -292,6 +348,12 @@ const WorldCup2026Predictor = () => {
               </button>
             ))}
             <button
+              onClick={() => setLiveLeaderboardMode(true)}
+              className="px-6 py-2 rounded-lg font-semibold transition bg-purple-500/80 text-white hover:bg-purple-600 flex items-center gap-2"
+            >
+              📺 Live Leaderboard
+            </button>
+            <button
               onClick={logout}
               className="px-6 py-2 rounded-lg font-semibold transition bg-red-500/80 text-white hover:bg-red-600 flex items-center gap-2"
             >
@@ -309,7 +371,7 @@ const WorldCup2026Predictor = () => {
             </div>
 
             <div className="mb-8">
-              <p className="text-gray-600 mb-4">Add players (3-9 people):</p>
+              <p className="text-gray-600 mb-4">Add players (unlimited):</p>
               <div className="flex gap-2 mb-4">
                 <input
                   type="text"
@@ -321,8 +383,7 @@ const WorldCup2026Predictor = () => {
                 />
                 <button
                   onClick={addPlayer}
-                  disabled={players.length >= 9 || !firebaseInitialized}
-                  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50"
+                  className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
                 >
                   Add
                 </button>
@@ -343,7 +404,7 @@ const WorldCup2026Predictor = () => {
               </div>
 
               <p className="text-sm text-gray-600 mt-4">
-                {players.length} of 9 players added
+                {players.length} players added
               </p>
             </div>
 

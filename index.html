@@ -28,7 +28,7 @@ body{margin:0;padding:0;}
 <body>
 <div id="root"></div>
 <script>
-const {useState,useEffect,useMemo} = React;
+const {useState,useEffect,useMemo,useRef} = React;
 const DB = "https://world-cup-2026-predictio-23e8f-default-rtdb.firebaseio.com";
 
 const fbGet = async (p) => {
@@ -38,6 +38,12 @@ const fbGet = async (p) => {
 const fbSet = async (p, d) => {
   try { const r = await fetch(DB + p + ".json", {method: "PUT", body: JSON.stringify(d)}); return r.ok; }
   catch { return false; }
+};
+const fbSetKey = async (key, val) => {
+  try {
+    const r = await fetch(DB + "/predictions/" + encodeURIComponent(key) + ".json", {method: "PUT", body: JSON.stringify(val)});
+    return r.ok;
+  } catch { return false; }
 };
 
 const GT = {
@@ -188,6 +194,7 @@ function App() {
   const [live, setLive] = useState(false);
   const [errs, setErrs] = useState({});
   const [viewId, setViewId] = useState(null);
+  const recentEdits = useRef({});
 
   const regOpen = () => new Date() < new Date(2026, 5, 12);
   const activeId = viewId || pid;
@@ -198,13 +205,26 @@ function App() {
       const d = await fbGet("/");
       if (d) {
         if (d.players) setPlayers(Object.values(d.players));
-        if (d.predictions) setPreds(d.predictions);
+        if (d.predictions) {
+          setPreds(prev => {
+            const merged = {...d.predictions};
+            const now = Date.now();
+            Object.keys(recentEdits.current).forEach(k => {
+              if (now - recentEdits.current[k] < 15000) {
+                if (prev[k] !== undefined) merged[k] = prev[k];
+              } else {
+                delete recentEdits.current[k];
+              }
+            });
+            return merged;
+          });
+        }
         if (d.tournamentStarted) setStarted(true);
       }
       setLoading(false);
     };
     load();
-    const iv = setInterval(load, 3000);
+    const iv = setInterval(load, 8000);
     return () => clearInterval(iv);
   }, []);
 
@@ -238,29 +258,29 @@ function App() {
   const login = (id, name) => { setPid(id); setPname(name); setTab("group"); };
   const logout = () => { setPid(null); setPname(""); setViewId(null); setTab("login"); };
 
-  const setPred = async (mid, val) => {
+  const setPred = (mid, val) => {
     if (isRO || !pid) return;
     const key = pid + "-" + mid;
+    recentEdits.current[key] = Date.now();
     const ne = {...errs};
     if (val && mid.indexOf("GOLDEN") === -1 && mid !== "MVP" && !/^\d+-\d+$/.test(val)) {
       ne[mid] = true;
       setErrs(ne);
-      setPreds({...preds, [key]: val});
+      setPreds(prev => ({...prev, [key]: val}));
       return;
     }
     delete ne[mid];
     setErrs(ne);
-    const up = {...preds, [key]: val};
-    setPreds(up);
-    await fbSet("/predictions", up);
+    setPreds(prev => ({...prev, [key]: val}));
+    fbSetKey(key, val);
   };
 
-  const setKO = async (mid, val) => {
+  const setKO = (mid, val) => {
     if (isRO || !pid) return;
     const key = pid + "-" + mid;
-    const up = {...preds, [key]: val};
-    setPreds(up);
-    await fbSet("/predictions", up);
+    recentEdits.current[key] = Date.now();
+    setPreds(prev => ({...prev, [key]: val}));
+    fbSetKey(key, val);
   };
 
   const getPred = (mid) => preds[activeId + "-" + mid] || "";
@@ -289,7 +309,7 @@ function App() {
 
   const e = React.createElement;
 
-  const BMatch = (props) => {
+  const renderBMatch = (props) => {
     const pr = getPred(props.mid);
     const opts = [props.t1, props.t2].filter(Boolean);
     let action;
@@ -303,7 +323,7 @@ function App() {
     } else {
       action = e("div", {className: "bdisabled"}, opts.length === 0 ? "Complete groups first" : "Waiting...");
     }
-    return e("div", {className: "bmatch"},
+    return e("div", {className: "bmatch", key: props.mid},
       e("div", {className: "bteam" + (pr === props.t1 && props.t1 ? " won" : !props.t1 ? " tbd" : "")}, props.t1 || "TBD"),
       e("div", {className: "bvs"}, props.label + " - " + props.date),
       e("div", {className: "bteam" + (pr === props.t2 && props.t2 ? " won" : !props.t2 ? " tbd" : "")}, props.t2 || "TBD"),
@@ -512,31 +532,31 @@ function App() {
             e("div", {className: "bcol"},
               e("div", {className: "bcolh"}, "ROUND OF 32"),
               e("div", {className: "bmatches"},
-                R32.map(m => e(BMatch, {key: m.id, mid: m.id, t1: slots[m.s1], t2: slots[m.s2], date: m.d, label: m.id}))
+                R32.map(m => renderBMatch({key: m.id, mid: m.id, t1: slots[m.s1], t2: slots[m.s2], date: m.d, label: m.id}))
               )
             ),
             e("div", {className: "bcol"},
               e("div", {className: "bcolh"}, "ROUND OF 16"),
               e("div", {className: "bmatches"},
-                R16.map(m => e(BMatch, {key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id}))
+                R16.map(m => renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id}))
               )
             ),
             e("div", {className: "bcol"},
               e("div", {className: "bcolh"}, "QUARTER FINALS"),
               e("div", {className: "bmatches"},
-                QF.map(m => e(BMatch, {key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id}))
+                QF.map(m => renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id}))
               )
             ),
             e("div", {className: "bcol"},
               e("div", {className: "bcolh"}, "SEMI FINALS"),
               e("div", {className: "bmatches"},
-                SF.map(m => e(BMatch, {key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id}))
+                SF.map(m => renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id}))
               )
             ),
             e("div", {className: "bcol"},
               e("div", {className: "bcolh final"}, "FINAL - Jul 19"),
               e("div", {className: "bmatches", style: {justifyContent: "center"}},
-                e(BMatch, {mid: "M104", t1: gKO("M101"), t2: gKO("M102"), date: "Jul 19", label: "M104 FINAL", isF: true})
+                renderBMatch({mid: "M104", t1: gKO("M101"), t2: gKO("M102"), date: "Jul 19", label: "M104 FINAL", isF: true})
               )
             )
           )

@@ -11,7 +11,7 @@
 body{margin:0;padding:0;}
 .bscroll{overflow-x:auto;padding-bottom:12px;}
 .bwrap{display:flex;gap:8px;min-width:900px;}
-.bcol{display:flex;flex-direction:column;flex:1;min-width:190px;}
+.bcol{display:flex;flex-direction:column;flex:1;min-width:175px;}
 .bcolh{text-align:center;font-weight:800;font-size:12px;color:#1e40af;background:#dbeafe;padding:8px 4px;border-radius:8px;margin-bottom:8px;}
 .bcolh.final{background:#fef08a;color:#92400e;}
 .bmatches{display:flex;flex-direction:column;flex:1;justify-content:space-around;gap:6px;}
@@ -596,40 +596,34 @@ function App() {
       tabContent = e("div", {className: "bg-white/95 rounded-2xl p-6 shadow-2xl"},
         e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Tournament Bracket"),
         e("p", {className: "text-gray-500 text-sm mb-4"}, "Official FIFA format: 12 group winners + 12 runners-up + 8 best third-placed teams. Teams auto-fill from your group predictions."),
-        e("div", {className: "bscroll"},
-          e("div", {className: "bwrap", style: {minWidth: "1150px"}},
-            e("div", {className: "bcol"},
-              e("div", {className: "bcolh"}, "ROUND OF 32"),
-              e("div", {className: "bmatches"},
-                orderBy(R32, R32_ORDER).map(m => renderBMatch({key: m.id, mid: m.id, t1: slots[m.s1], t2: slots[m.s2], date: m.d, label: m.id}))
-              )
-            ),
-            e("div", {className: "bcol"},
-              e("div", {className: "bcolh"}, "ROUND OF 16"),
-              e("div", {className: "bmatches"},
-                orderBy(R16, R16_ORDER).map(m => renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id, waitingOn: m.f1 + " & " + m.f2}))
-              )
-            ),
-            e("div", {className: "bcol"},
-              e("div", {className: "bcolh"}, "QUARTER FINALS"),
-              e("div", {className: "bmatches"},
-                orderBy(QF, QF_ORDER).map(m => renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id, waitingOn: m.f1 + " & " + m.f2}))
-              )
-            ),
-            e("div", {className: "bcol"},
-              e("div", {className: "bcolh"}, "SEMI FINALS"),
-              e("div", {className: "bmatches"},
-                SF.map(m => renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id, waitingOn: m.f1 + " & " + m.f2}))
-              )
-            ),
-            e("div", {className: "bcol"},
-              e("div", {className: "bcolh final"}, "FINAL - Jul 19"),
-              e("div", {className: "bmatches", style: {justifyContent: "center"}},
-                renderBMatch({mid: "M104", t1: gKO("M101"), t2: gKO("M102"), date: "Jul 19", label: "M104 FINAL", isF: true, waitingOn: "M101 & M102"})
-              )
+        (() => {
+          // Mirrored bracket: Pathway 1 (left) and Pathway 2 (right) meet at the Final
+          const P1_R32 = ["M74","M77","M73","M75","M83","M84","M81","M82"];
+          const P2_R32 = ["M76","M78","M79","M80","M86","M88","M85","M87"];
+          const P1_R16 = ["M89","M90","M93","M94"];
+          const P2_R16 = ["M91","M92","M95","M96"];
+          const P1_QF = ["M97","M98"];
+          const P2_QF = ["M99","M100"];
+          const r32m = (id) => { const m = R32.find(x => x.id === id); return renderBMatch({key: m.id, mid: m.id, t1: slots[m.s1], t2: slots[m.s2], date: m.d, label: m.id}); };
+          const kom = (arr, id) => { const m = arr.find(x => x.id === id); return renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id, waitingOn: m.f1 + " & " + m.f2}); };
+          const col = (title, items, isFinal) => e("div", {className: "bcol"},
+            e("div", {className: "bcolh" + (isFinal ? " final" : "")}, title),
+            e("div", {className: "bmatches", style: isFinal ? {justifyContent: "center"} : null}, items)
+          );
+          return e("div", {className: "bscroll"},
+            e("div", {className: "bwrap", style: {minWidth: "1750px"}},
+              col("R32", P1_R32.map(id => r32m(id))),
+              col("R16", P1_R16.map(id => kom(R16, id))),
+              col("QF", P1_QF.map(id => kom(QF, id))),
+              col("SF", [kom(SF, "M101")]),
+              col("FINAL - Jul 19", [renderBMatch({mid: "M104", t1: gKO("M101"), t2: gKO("M102"), date: "Jul 19", label: "M104", isF: true, waitingOn: "M101 & M102"})], true),
+              col("SF", [kom(SF, "M102")]),
+              col("QF", P2_QF.map(id => kom(QF, id))),
+              col("R16", P2_R16.map(id => kom(R16, id))),
+              col("R32", P2_R32.map(id => r32m(id)))
             )
-          )
-        )
+          );
+        })()
       );
     }
 

@@ -29,7 +29,7 @@ body{margin:0;padding:0;}
 <div id="root"></div>
 <script>
 const {useState,useEffect,useMemo}=React;
-const DB="https://world-cup-2026-predictio-23e8f.firebaseio.com";
+const DB="https://world-cup-2026-predictio-23e8f-default-rtdb.firebaseio.com";
 const fbGet=async(p)=>{try{const r=await fetch(DB+p+".json");return r.ok?await r.json():null;}catch{return null;}};
 const fbSet=async(p,d)=>{try{const r=await fetch(DB+p+".json",{method:"PUT",body:JSON.stringify(d)});return r.ok;}catch{return false;}};
 

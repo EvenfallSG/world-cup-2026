@@ -94,23 +94,44 @@ const GM = [
   {id:"L5",t1:"England",t2:"Ghana",g:"L"},{id:"L6",t1:"Panama",t2:"Croatia",g:"L"}
 ];
 
+// Official FIFA 2026 bracket (Appendix A). T1-T8 = best third-placed teams.
 const R32 = [
-  {id:"R32_1",s1:"1A",s2:"2B",d:"Jun 29"},{id:"R32_2",s1:"1B",s2:"2A",d:"Jun 29"},
-  {id:"R32_3",s1:"1C",s2:"2D",d:"Jun 30"},{id:"R32_4",s1:"1D",s2:"2C",d:"Jun 30"},
-  {id:"R32_5",s1:"1E",s2:"2F",d:"Jul 1"},{id:"R32_6",s1:"1F",s2:"2E",d:"Jul 1"},
-  {id:"R32_7",s1:"1G",s2:"2H",d:"Jul 2"},{id:"R32_8",s1:"1H",s2:"2G",d:"Jul 2"},
-  {id:"R32_9",s1:"1I",s2:"2J",d:"Jul 3"},{id:"R32_10",s1:"1J",s2:"2I",d:"Jul 3"},
-  {id:"R32_11",s1:"1K",s2:"2L",d:"Jul 4"},{id:"R32_12",s1:"1L",s2:"2K",d:"Jul 4"}
+  {id:"M73",s1:"2A",s2:"2B",d:"Jun 28"},
+  {id:"M74",s1:"1E",s2:"T1",d:"Jun 28"},
+  {id:"M75",s1:"1F",s2:"2C",d:"Jun 29"},
+  {id:"M76",s1:"1C",s2:"2F",d:"Jun 29"},
+  {id:"M77",s1:"1I",s2:"T2",d:"Jun 29"},
+  {id:"M78",s1:"2E",s2:"2I",d:"Jun 30"},
+  {id:"M79",s1:"1A",s2:"T3",d:"Jun 30"},
+  {id:"M80",s1:"1L",s2:"T4",d:"Jun 30"},
+  {id:"M81",s1:"1D",s2:"T5",d:"Jul 1"},
+  {id:"M82",s1:"1G",s2:"T6",d:"Jul 1"},
+  {id:"M83",s1:"2K",s2:"2L",d:"Jul 1"},
+  {id:"M84",s1:"1H",s2:"2J",d:"Jul 2"},
+  {id:"M85",s1:"1B",s2:"T7",d:"Jul 2"},
+  {id:"M86",s1:"1J",s2:"2H",d:"Jul 2"},
+  {id:"M87",s1:"1K",s2:"T8",d:"Jul 3"},
+  {id:"M88",s1:"2D",s2:"2G",d:"Jul 3"}
+];
+const R16 = [
+  {id:"M89",f1:"M74",f2:"M77",d:"Jul 4"},
+  {id:"M90",f1:"M73",f2:"M75",d:"Jul 4"},
+  {id:"M91",f1:"M76",f2:"M78",d:"Jul 5"},
+  {id:"M92",f1:"M79",f2:"M80",d:"Jul 5"},
+  {id:"M93",f1:"M83",f2:"M84",d:"Jul 6"},
+  {id:"M94",f1:"M81",f2:"M82",d:"Jul 6"},
+  {id:"M95",f1:"M86",f2:"M88",d:"Jul 7"},
+  {id:"M96",f1:"M85",f2:"M87",d:"Jul 7"}
 ];
 const QF = [
-  {id:"QF1",f1:"R32_1",f2:"R32_2",d:"Jul 9"},{id:"QF2",f1:"R32_3",f2:"R32_4",d:"Jul 9"},
-  {id:"QF3",f1:"R32_5",f2:"R32_6",d:"Jul 10"},{id:"QF4",f1:"R32_7",f2:"R32_8",d:"Jul 10"},
-  {id:"QF5",f1:"R32_9",f2:"R32_10",d:"Jul 11"},{id:"QF6",f1:"R32_11",f2:"R32_12",d:"Jul 11"}
+  {id:"M97",f1:"M89",f2:"M90",d:"Jul 9"},
+  {id:"M98",f1:"M93",f2:"M94",d:"Jul 10"},
+  {id:"M99",f1:"M91",f2:"M92",d:"Jul 10"},
+  {id:"M100",f1:"M95",f2:"M96",d:"Jul 11"}
 ];
 const SF = [
-  {id:"SF1",f1:"QF1",f2:"QF2",d:"Jul 15"},
-  {id:"SF2",f1:"QF3",f2:"QF4",d:"Jul 15"},
-  {id:"SF3",f1:"QF5",f2:"QF6",d:"Jul 16"}
+  {id:"M101",f1:"M97",f2:"M98",d:"Jul 14"},
+  {id:"M102",f1:"M99",f2:"M100",d:"Jul 15"}
 ];
 
 function calcStandings(pid, preds) {
@@ -134,6 +155,7 @@ function calcStandings(pid, preds) {
     else { t1.pts++; t2.pts++; t1.d++; t2.d++; }
   });
   const q = {};
+  const thirds = [];
   Object.keys(st).forEach(g => {
     st[g].sort((a, b) => {
       if (b.pts !== a.pts) return b.pts - a.pts;
@@ -142,8 +164,16 @@ function calcStandings(pid, preds) {
       return b.gf - a.gf;
     });
     q[g] = {first: st[g][0] ? st[g][0].team : null, second: st[g][1] ? st[g][1].team : null};
+    if (st[g][2] && st[g][2].played > 0) thirds.push(st[g][2]);
   });
-  return {standings: st, qualified: q};
+  thirds.sort((a, b) => {
+    if (b.pts !== a.pts) return b.pts - a.pts;
+    const gdb = b.gf - b.ga, gda = a.gf - a.ga;
+    if (gdb !== gda) return gdb - gda;
+    return b.gf - a.gf;
+  });
+  const bestThirds = thirds.slice(0, 8).map(t => t.team);
+  return {standings: st, qualified: q, bestThirds: bestThirds};
 }
 
 function App() {
@@ -237,11 +267,12 @@ function App() {
   const gKO = (mid) => preds[activeId + "-" + mid] || null;
 
   const calcResult = useMemo(
-    () => activeId ? calcStandings(activeId, preds) : {standings: {}, qualified: {}},
+    () => activeId ? calcStandings(activeId, preds) : {standings: {}, qualified: {}, bestThirds: []},
     [activeId, preds]
   );
   const standings = calcResult.standings;
   const qualified = calcResult.qualified;
+  const bestThirds = calcResult.bestThirds || [];
 
   const slots = useMemo(() => {
     if (!activeId) return {};
@@ -250,8 +281,11 @@ function App() {
       s["1" + g] = qualified[g].first;
       s["2" + g] = qualified[g].second;
     });
+    for (let i = 0; i < 8; i++) {
+      s["T" + (i + 1)] = bestThirds[i] || null;
+    }
     return s;
-  }, [qualified, activeId]);
+  }, [qualified, bestThirds, activeId]);
 
   const e = React.createElement;
 
@@ -472,13 +506,19 @@ function App() {
     } else if (tab === "bracket") {
       tabContent = e("div", {className: "bg-white/95 rounded-2xl p-6 shadow-2xl"},
         e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Tournament Bracket"),
-        e("p", {className: "text-gray-500 text-sm mb-4"}, "Teams auto-fill from group predictions. Pick winners to advance them!"),
+        e("p", {className: "text-gray-500 text-sm mb-4"}, "Official FIFA format: 12 group winners + 12 runners-up + 8 best third-placed teams. Teams auto-fill from your group predictions."),
         e("div", {className: "bscroll"},
-          e("div", {className: "bwrap"},
+          e("div", {className: "bwrap", style: {minWidth: "1150px"}},
             e("div", {className: "bcol"},
               e("div", {className: "bcolh"}, "ROUND OF 32"),
               e("div", {className: "bmatches"},
-                R32.map(m => e(BMatch, {key: m.id, mid: m.id, t1: slots[m.s1], t2: slots[m.s2], date: m.d, label: m.id.replace("R32_", "M")}))
+                R32.map(m => e(BMatch, {key: m.id, mid: m.id, t1: slots[m.s1], t2: slots[m.s2], date: m.d, label: m.id}))
+              )
+            ),
+            e("div", {className: "bcol"},
+              e("div", {className: "bcolh"}, "ROUND OF 16"),
+              e("div", {className: "bmatches"},
+                R16.map(m => e(BMatch, {key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id}))
               )
             ),
             e("div", {className: "bcol"},
@@ -496,7 +536,7 @@ function App() {
             e("div", {className: "bcol"},
               e("div", {className: "bcolh final"}, "FINAL - Jul 19"),
               e("div", {className: "bmatches", style: {justifyContent: "center"}},
-                e(BMatch, {mid: "FINAL", t1: gKO("SF1"), t2: gKO("SF2"), date: "Jul 19", label: "FINAL", isF: true})
+                e(BMatch, {mid: "M104", t1: gKO("M101"), t2: gKO("M102"), date: "Jul 19", label: "M104 FINAL", isF: true})
               )
             )
           )

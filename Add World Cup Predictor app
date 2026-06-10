@@ -1,1 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FIFA World Cup 2026 Predictor</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js"></script>
+    <style>
+        body { margin: 0; padding: 0; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
 
+    <script>
+        const { useState, useEffect } = React;
+        const { initializeApp } = window.firebase;
+        const { getDatabase, ref, set, get, onValue, remove } = window.firebase.database;
+
+        const FIREBASE_CONFIG = {
+            apiKey: "AIzaSyAn0EcY75z0zuBnpJ6R1IbfNTll5vndMv4",
+            authDomain: "world-cup-2026-predictio-23e8f.firebaseapp.com",
+            databaseURL: "https://world-cup-2026-predictio-23e8f.firebaseio.com",
+            projectId: "world-cup-2026-predictio-23e8f",
+            storageBucket: "world-cup-2026-predictio-23e8f.firebasestorage.app",
+            messagingSenderId: "265305573848",
+            appId: "1:265305573848:web:521ec31bf2dd1962ef8aad"
+        };
+
+        let db = null;
+        let firebaseInitialized = false;
+
+        try {
+            const app = initializeApp(FIREBASE_CONFIG);
+            db = getDatabase(app);
+            firebaseInitialized = true;
+        } catch (error) {
+            console.error('Firebase initialization error:', error);
+        }
+
+        const WorldCup2026Predictor = () => {
+            const [players, setPlayers] = useState([]);
+            const [newPlayerName, setNewPlayerName] = useState('');
+            const [currentPlayerId, setCurrentPlayerId] = useState(null);
+            const [currentPlayerName, setCurrentPlayerName] = useState('');
+            const [activeTab, setActiveTab] = useState('setup');
+            const [predictions, setPredictions] = useState({});
+            const [results, setResults] = useState({});
+            const [specialPredictions, setSpecialPredictions] = useState({});
+            const [tournamentStarted, setTournamentStarted] = useState(false);
+            const [loading, setLoading] = useState(false);
+            const [liveLeaderboardMode, setLiveLeaderboardMode] = useState(false);
+
+            const groupMatches = [
+                { id: 'A1', date: 'Jun 11', team1: 'Mexico', team2: 'South Africa', group: 'A' },
+                { id: 'A2', date: 'Jun 11', team1: 'South Korea', team2: 'Czechia', group: 'A' },
+                { id: 'A3', date: 'Jun 16', team1: 'Mexico', team2: 'Czechia', group: 'A' },
+                { id: 'A4', date: 'Jun 16', team1: 'South Korea', team2: 'South Africa', group: 'A' },
+                { id: 'A5', date: 'Jun 23', team1: 'Mexico', team2: 'South Korea', group: 'A' },
+                { id: 'A6', date: 'Jun 23', team1: 'Czechia', team2: 'South Africa', group: 'A' },
+                { id: 'B1', date: 'Jun 12', team1: 'Canada', team2: 'Bosnia-Herzegovina', group: 'B' },
+                { id: 'B2', date: 'Jun 12', team1: 'Qatar', team2: 'Switzerland', group: 'B' },
+                { id: 'B3', date: 'Jun 17', team1: 'Canada', team2: 'Qatar', group: 'B' },
+                { id: 'B4', date: 'Jun 17', team1: 'Switzerland', team2: 'Bosnia-Herzegovina', group: 'B' },
+                { id: 'B5', date: 'Jun 23', team1: 'Canada', team2: 'Switzerland', group: 'B' },
+                { id: 'B6', date: 'Jun 23', team1: 'Bosnia-Herzegovina', team2: 'Qatar', group: 'B' },
+                { id: 'C1', date: 'Jun 13', team1: 'Brazil', team2: 'Morocco', group: 'C' },
+                { id: 'C2', date: 'Jun 13', team1: 'Haiti', team2: 'Scotland', group: 'C' },
+                { id: 'C3', date: 'Jun 18', team1: 'Brazil', team2: 'Scotland', group: 'C' },
+                { id: 'C4', date: 'Jun 18', team1: 'Morocco', team2: 'Haiti', group: 'C' },
+                { id: 'C5', date: 'Jun 24', team1: 'Brazil', team2: 'Haiti', group: 'C' },
+                { id: 'C6', date: 'Jun 24', team1: 'Morocco', team2: 'Scotland', group: 'C' },
+                { id: 'D1', date: 'Jun 12', team1: 'United States', team2: 'Paraguay', group: 'D' },
+                { id: 'D2', date: 'Jun 13', team1: 'Australia', team2: 'Türkiye', group: 'D' },
+                { id: 'D3', date: 'Jun 17', team1: 'United States', team2: 'Australia', group: 'D' },
+                { id: 'D4', date: 'Jun 18', team1: 'Türkiye', team2: 'Paraguay', group: 'D' },
+                { id: 'D5', date: 'Jun 24', team1: 'United States', team2: 'Türkiye', group: 'D' },
+                { id: 'D6', date: 'Jun 25', team1: 'Paraguay', team2: 'Australia', group: 'D' },
+                { id: 'E1', date: 'Jun 14', team1: 'Germany', team2: 'Curaçao', group: 'E' },
+                { id: 'E2', date: 'Jun 14', team1: 'Ivory Coast', team2: 'Ecuador', group: 'E' },
+                { id: 'E3', date: 'Jun 19', team1: 'Germany', team2: 'Ecuador', group: 'E' },
+                { id: 'E4', date: 'Jun 19', team1: 'Curaçao', team2: 'Ivory Coast', group: 'E' },
+                { id: 'E5', date: 'Jun 25', team1: 'Germany', team2: 'Ivory Coast', group: 'E' },
+                { id: 'E6', date: 'Jun 25', team1: 'Ecuador', team2: 'Curaçao', group: 'E' },
+                { id: 'F1', date: 'Jun 14', team1: 'Netherlands', team2: 'Japan', group: 'F' },
+                { id: 'F2', date: 'Jun 14', team1: 'Sweden', team2: 'Tunisia', group: 'F' },
+                { id: 'F3', date: 'Jun 19', team1: 'Netherlands', team2: 'Tunisia', group: 'F' },
+                { id: 'F4', date: 'Jun 20', team1: 'Japan', team2: 'Sweden', group: 'F' },
+                { id: 'F5', date: 'Jun 26', team1: 'Netherlands', team2: 'Sweden', group: 'F' },
+                { id: 'F6', date: 'Jun 26', team1: 'Tunisia', team2: 'Japan', group: 'F' },
+                { id: 'G1', date: 'Jun 15', team1: 'Belgium', team2: 'Egypt', group: 'G' },
+                { id: 'G2', date: 'Jun 15', team1: 'Iran', team2: 'New Zealand', group: 'G' },
+                { id: 'G3', date: 'Jun 20', team1: 'Belgium', team2: 'New Zealand', group: 'G' },
+                { id: 'G4', date: 'Jun 20', team1: 'Egypt', team2: 'Iran', group: 'G' },
+                { id: 'G5', date: 'Jun 26', team1: 'Belgium', team2: 'Iran', group: 'G' },
+                { id: 'G6', date: 'Jun 26', team1: 'Egypt', team2: 'New Zealand', group: 'G' },
+                { id: 'H1', date: 'Jun 15', team1: 'Spain', team2: 'Cape Verde', group: 'H' },
+                { id: 'H2', date: 'Jun 15', team1: 'Saudi Arabia', team2: 'Uruguay', group: 'H' },
+                { id: 'H3', date: 'Jun 21', team1: 'Spain', team2: 'Saudi Arabia', group: 'H' },
+                { id: 'H4', date: 'Jun 21', team1: 'Cape Verde', team2: 'Uruguay', group: 'H' },
+                { id: 'H5', date: 'Jun 27', team1: 'Spain', team2: 'Uruguay', group: 'H' },
+                { id: 'H6', date: 'Jun 27', team1: 'Cape Verde', team2: 'Saudi Arabia', group: 'H' },
+                { id: 'I1', date: 'Jun 16', team1: 'France', team2: 'Senegal', group: 'I' },
+                { id: 'I2', date: 'Jun 16', team1: 'Iraq', team2: 'Norway', group: 'I' },
+                { id: 'I3', date: 'Jun 21', team1: 'France', team2: 'Norway', group: 'I' },
+                { id: 'I4', date: 'Jun 22', team1: 'Senegal', team2: 'Iraq', group: 'I' },
+                { id: 'I5', date: 'Jun 27', team1: 'France', team2: 'Iraq', group: 'I' },
+                { id: 'I6', date: 'Jun 27', team1: 'Norway', team2: 'Senegal', group: 'I' },
+                { id: 'J1', date: 'Jun 16', team1: 'Argentina', team2: 'Algeria', group: 'J' },
+                { id: 'J2', date: 'Jun 17', team1: 'Austria', team2: 'Jordan', group: 'J' },
+                { id: 'J3', date: 'Jun 22', team1: 'Argentina', team2: 'Jordan', group: 'J' },
+                { id: 'J4', date: 'Jun 22', team1: 'Algeria', team2: 'Austria', group: 'J' },
+                { id: 'J5', date: 'Jun 28', team1: 'Argentina', team2: 'Austria', group: 'J' },
+                { id: 'J6', date: 'Jun 28', team1: 'Algeria', team2: 'Jordan', group: 'J' },
+                { id: 'K1', date: 'Jun 17', team1: 'Colombia', team2: 'Uzbekistan', group: 'K' },
+                { id: 'K2', date: 'Jun 17', team1: 'Portugal', team2: 'Congo DR', group: 'K' },
+                { id: 'K3', date: 'Jun 22', team1: 'Colombia', team2: 'Congo DR', group: 'K' },
+                { id: 'K4', date: 'Jun 23', team1: 'Uzbekistan', team2: 'Portugal', group: 'K' },
+                { id: 'K5', date: 'Jun 28', team1: 'Colombia', team2: 'Portugal', group: 'K' },
+                { id: 'K6', date: 'Jun 28', team1: 'Congo DR', team2: 'Uzbekistan', group: 'K' },
+                { id: 'L1', date: 'Jun 17', team1: 'England', team2: 'Croatia', group: 'L' },
+                { id: 'L2', date: 'Jun 17', team1: 'Ghana', team2: 'Panama', group: 'L' },
+                { id: 'L3', date: 'Jun 23', team1: 'England', team2: 'Panama', group: 'L' },
+                { id: 'L4', date: 'Jun 23', team1: 'Croatia', team2: 'Ghana', group: 'L' },
+                { id: 'L5', date: 'Jun 27', team1: 'England', team2: 'Ghana', group: 'L' },
+                { id: 'L6', date: 'Jun 27', team1: 'Panama', team2: 'Croatia', group: 'L' },
+            ];
+
+            useEffect(() => {
+                if (!firebaseInitialized) return;
+                setLoading(true);
+                const dbRef = ref(db, '/');
+                onValue(dbRef, (snapshot) => {
+                    const data = snapshot.val();
+                    if (data) {
+                        if (data.players) setPlayers(Object.values(data.players));
+                        if (data.predictions) setPredictions(data.predictions);
+                        if (data.results) setResults(data.results);
+                        if (data.specialPredictions) setSpecialPredictions(data.specialPredictions);
+                        if (data.tournamentStarted) setTournamentStarted(data.tournamentStarted);
+                    }
+                    setLoading(false);
+                });
+            }, []);
+
+            const addPlayer = async () => {
+                if (!firebaseInitialized) {
+                    alert('Firebase not configured.');
+                    return;
+                }
+                if (newPlayerName.trim()) {
+                    const newPlayer = { id: Date.now().toString(), name: newPlayerName };
+                    const updatedPlayers = [...players, newPlayer];
+                    setPlayers(updatedPlayers);
+                    const playersList = {};
+                    updatedPlayers.forEach(p => { playersList[p.id] = p; });
+                    await set(ref(db, 'players'), playersList);
+                    setNewPlayerName('');
+                }
+            };
+
+            const removePlayer = async (id) => {
+                const updatedPlayers = players.filter(p => p.id !== id);
+                setPlayers(updatedPlayers);
+                const playersList = {};
+                updatedPlayers.forEach(p => { playersList[p.id] = p; });
+                await set(ref(db, 'players'), playersList);
+            };
+
+            const startTournament = async () => {
+                if (players.length >= 3) {
+                    setTournamentStarted(true);
+                    await set(ref(db, 'tournamentStarted'), true);
+                    setActiveTab('login');
+                }
+            };
+
+            const loginPlayer = (playerId, playerName) => {
+                setCurrentPlayerId(playerId);
+                setCurrentPlayerName(playerName);
+                setActiveTab('predictions');
+            };
+
+            const logout = () => {
+                setCurrentPlayerId(null);
+                setCurrentPlayerName('');
+                setActiveTab('login');
+            };
+
+            const setPrediction = async (playerId, matchId, prediction) => {
+                const key = `${playerId}-${matchId}`;
+                const updatedPredictions = { ...predictions, [key]: prediction };
+                setPredictions(updatedPredictions);
+                await set(ref(db, 'predictions'), updatedPredictions);
+            };
+
+            const setResult = async (matchId, result) => {
+                const updatedResults = { ...results, [matchId]: result };
+                setResults(updatedResults);
+                await set(ref(db, 'results'), updatedResults);
+            };
+
+            const calculateScores = () => {
+                const scores = {};
+                players.forEach(p => {
+                    scores[p.id] = { name: p.name, points: 0, correctPredictions: 0 };
+                });
+                Object.entries(results).forEach(([matchId, result]) => {
+                    players.forEach(p => {
+                        const key = `${p.id}-${matchId}`;
+                        const prediction = predictions[key];
+                        if (prediction && prediction === result) {
+                            scores[p.id].points += 1;
+                            scores[p.id].correctPredictions += 1;
+                        }
+                    });
+                });
+                return Object.values(scores).sort((a, b) => b.points - a.points);
+            };
+
+            const getPlayerPrediction = (playerId, matchId) => {
+                return predictions[`${playerId}-${matchId}`];
+            };
+
+            if (loading) {
+                return React.createElement('div', { className: 'min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-green-800 flex items-center justify-center' },
+                    React.createElement('div', { className: 'text-white text-2xl' }, 'Loading...')
+                );
+            }
+
+            if (liveLeaderboardMode) {
+                return React.createElement('div', { className: 'min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-green-800 p-8' },
+                    React.createElement('div', { className: 'max-w-6xl mx-auto' },
+                        React.createElement('div', { className: 'text-center mb-8' },
+                            React.createElement('h1', { className: 'text-6xl font-bold text-white mb-4' }, '🏆 LIVE LEADERBOARD 🏆'),
+                            React.createElement('p', { className: 'text-2xl text-blue-100' }, 'FIFA World Cup 2026 Predictions')
+                        ),
+                        React.createElement('div', { className: 'bg-white/98 rounded-3xl p-12 shadow-2xl' },
+                            React.createElement('table', { className: 'w-full' },
+                                React.createElement('thead', null,
+                                    React.createElement('tr', { className: 'border-b-4 border-blue-900' },
+                                        React.createElement('th', { className: 'px-8 py-6 text-left text-blue-900 font-bold text-4xl' }, 'Rank'),
+                                        React.createElement('th', { className: 'px-8 py-6 text-left text-blue-900 font-bold text-4xl' }, 'Player'),
+                                        React.createElement('th', { className: 'px-8 py-6 text-right text-blue-900 font-bold text-4xl' }, 'Points'),
+                                        React.createElement('th', { className: 'px-8 py-6 text-right text-blue-900 font-bold text-4xl' }, 'Correct')
+                                    )
+                                ),
+                                React.createElement('tbody', null,
+                                    calculateScores().map((score, idx) =>
+                                        React.createElement('tr', { key: idx, className: `border-b-2 border-blue-200 ${idx === 0 ? 'bg-yellow-100' : idx === 1 ? 'bg-gray-100' : idx === 2 ? 'bg-orange-100' : 'bg-white'}` },
+                                            React.createElement('td', { className: 'px-8 py-8 font-bold text-blue-900 text-5xl' }, idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1),
+                                            React.createElement('td', { className: 'px-8 py-8 font-bold text-blue-900 text-4xl' }, score.name),
+                                            React.createElement('td', { className: 'px-8 py-8 text-right text-5xl font-bold text-green-600' }, score.points),
+                                            React.createElement('td', { className: 'px-8 py-8 text-right text-4xl text-blue-900' }, score.correctPredictions)
+                                        )
+                                    )
+                                )
+                            )
+                        ),
+                        React.createElement('div', { className: 'text-center mt-8' },
+                            React.createElement('button', { onClick: () => setLiveLeaderboardMode(false), className: 'px-8 py-4 bg-red-500 text-white text-2xl font-bold rounded-lg hover:bg-red-600' }, '✕ Exit Live Mode')
+                        )
+                    )
+                );
+            }
+
+            return React.createElement('div', { className: 'min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-green-800 p-4 md:p-8' },
+                React.createElement('div', { className: 'max-w-7xl mx-auto' },
+                    React.createElement('div', { className: 'text-center mb-8' },
+                        React.createElement('h1', { className: 'text-4xl md:text-5xl font-bold text-white' }, '🏆 FIFA World Cup 2026 🏆'),
+                        React.createElement('p', { className: 'text-blue-100 text-lg' }, 'Prediction Tracker')
+                    ),
+                    !tournamentStarted && React.createElement('div', { className: 'bg-white/95 rounded-2xl p-8 shadow-2xl' },
+                        React.createElement('h2', { className: 'text-3xl font-bold text-blue-900 mb-6' }, 'Tournament Setup'),
+                        React.createElement('div', { className: 'mb-8' },
+                            React.createElement('p', { className: 'text-gray-600 mb-4' }, 'Add players (unlimited):'),
+                            React.createElement('div', { className: 'flex gap-2 mb-4' },
+                                React.createElement('input', {
+                                    type: 'text',
+                                    value: newPlayerName,
+                                    onChange: (e) => setNewPlayerName(e.target.value),
+                                    onKeyPress: (e) => e.key === 'Enter' && addPlayer(),
+                                    placeholder: 'Player name...',
+                                    className: 'flex-1 px-4 py-3 border-2 border-blue-300 rounded-lg focus:outline-none focus:border-blue-600'
+                                }),
+                                React.createElement('button', {
+                                    onClick: addPlayer,
+                                    className: 'px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700'
+                                }, 'Add')
+                            ),
+                            React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3' },
+                                players.map(player =>
+                                    React.createElement('div', { key: player.id, className: 'flex items-center justify-between bg-blue-50 p-4 rounded-lg' },
+                                        React.createElement('span', { className: 'font-semibold text-blue-900' }, player.name),
+                                        React.createElement('button', {
+                                            onClick: () => removePlayer(player.id),
+                                            className: 'text-red-500 hover:text-red-700 font-bold'
+                                        }, '✕')
+                                    )
+                                )
+                            ),
+                            React.createElement('p', { className: 'text-sm text-gray-600 mt-4' }, `${players.length} players added`)
+                        ),
+                        players.length >= 3 && React.createElement('button', {
+                            onClick: startTournament,
+                            className: 'w-full px-6 py-4 bg-gradient-to-r from-blue-600 to-green-600 text-white text-xl font-bold rounded-lg hover:shadow-xl transition'
+                        }, 'Start Tournament! 🎉')
+                    ),
+                    tournamentStarted && !currentPlayerId && React.createElement('div', { className: 'bg-white/95 rounded-2xl p-8 shadow-2xl max-w-md mx-auto' },
+                        React.createElement('h2', { className: 'text-3xl font-bold text-blue-900 mb-6 text-center' }, 'Welcome!'),
+                        React.createElement('p', { className: 'text-gray-600 mb-6 text-center' }, 'Select your name:'),
+                        React.createElement('div', { className: 'space-y-3' },
+                            players.map(player =>
+                                React.createElement('button', {
+                                    key: player.id,
+                                    onClick: () => loginPlayer(player.id, player.name),
+                                    className: 'w-full px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition'
+                                }, player.name)
+                            )
+                        )
+                    ),
+                    tournamentStarted && currentPlayerId && React.createElement('div', null,
+                        React.createElement('div', { className: 'flex gap-2 mb-6 justify-center flex-wrap' },
+                            React.createElement('button', {
+                                onClick: () => setActiveTab('predictions'),
+                                className: `px-6 py-2 rounded-lg font-semibold transition ${activeTab === 'predictions' ? 'bg-yellow-300 text-blue-900' : 'bg-white/20 text-white hover:bg-white/30'}`
+                            }, 'Predictions'),
+                            React.createElement('button', {
+                                onClick: () => setActiveTab('results'),
+                                className: `px-6 py-2 rounded-lg font-semibold transition ${activeTab === 'results' ? 'bg-yellow-300 text-blue-900' : 'bg-white/20 text-white hover:bg-white/30'}`
+                            }, 'Results'),
+                            React.createElement('button', {
+                                onClick: () => setActiveTab('leaderboard'),
+                                className: `px-6 py-2 rounded-lg font-semibold transition ${activeTab === 'leaderboard' ? 'bg-yellow-300 text-blue-900' : 'bg-white/20 text-white hover:bg-white/30'}`
+                            }, 'Leaderboard'),
+                            React.createElement('button', {
+                                onClick: () => setLiveLeaderboardMode(true),
+                                className: 'px-6 py-2 rounded-lg font-semibold transition bg-purple-500/80 text-white hover:bg-purple-600'
+                            }, '📺 Live Leaderboard'),
+                            React.createElement('button', {
+                                onClick: logout,
+                                className: 'px-6 py-2 rounded-lg font-semibold transition bg-red-500/80 text-white hover:bg-red-600'
+                            }, 'Logout')
+                        ),
+                        activeTab === 'leaderboard' && React.createElement('div', { className: 'bg-white/95 rounded-2xl p-8 shadow-2xl' },
+                            React.createElement('h2', { className: 'text-3xl font-bold text-blue-900 mb-6' }, 'Leaderboard'),
+                            React.createElement('div', { className: 'overflow-x-auto' },
+                                React.createElement('table', { className: 'w-full' },
+                                    React.createElement('thead', null,
+                                        React.createElement('tr', { className: 'border-b-2 border-blue-900' },
+                                            React.createElement('th', { className: 'px-4 py-3 text-left text-blue-900 font-bold' }, 'Rank'),
+                                            React.createElement('th', { className: 'px-4 py-3 text-left text-blue-900 font-bold' }, 'Player'),
+                                            React.createElement('th', { className: 'px-4 py-3 text-right text-blue-900 font-bold' }, 'Points'),
+                                            React.createElement('th', { className: 'px-4 py-3 text-right text-blue-900 font-bold' }, 'Correct')
+                                        )
+                                    ),
+                                    React.createElement('tbody', null,
+                                        calculateScores().map((score, idx) =>
+                                            React.createElement('tr', { key: idx, className: idx === 0 ? 'bg-yellow-100' : idx === 1 ? 'bg-gray-100' : idx === 2 ? 'bg-orange-100' : '' },
+                                                React.createElement('td', { className: 'px-4 py-3 font-bold text-blue-900' }, idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1),
+                                                React.createElement('td', { className: 'px-4 py-3 font-semibold text-blue-900' }, score.name),
+                                                React.createElement('td', { className: 'px-4 py-3 text-right text-2xl font-bold text-green-600' }, score.points),
+                                                React.createElement('td', { className: 'px-4 py-3 text-right text-blue-900' }, score.correctPredictions)
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        ),
+                        activeTab === 'predictions' && React.createElement('div', { className: 'bg-white/95 rounded-2xl p-8 shadow-2xl' },
+                            React.createElement('h2', { className: 'text-2xl font-bold text-blue-900 mb-6' }, 'Match Predictions'),
+                            React.createElement('div', { className: 'space-y-4' },
+                                ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'].map(group =>
+                                    React.createElement('div', { key: group },
+                                        React.createElement('h3', { className: 'text-xl font-bold text-blue-900 mb-3' }, `Group ${group}`),
+                                        React.createElement('div', { className: 'space-y-2' },
+                                            groupMatches.filter(m => m.group === group).map(match =>
+                                                React.createElement('div', { key: match.id, className: 'p-4 bg-blue-50 rounded-lg' },
+                                                    React.createElement('div', { className: 'font-semibold text-blue-900 mb-2' }, `${match.date}: ${match.team1} vs ${match.team2}`),
+                                                    React.createElement('select', {
+                                                        value: getPlayerPrediction(currentPlayerId, match.id) || '',
+                                                        onChange: (e) => setPrediction(currentPlayerId, match.id, e.target.value),
+                                                        className: 'w-full px-4 py-2 border-2 border-blue-300 rounded font-semibold focus:outline-none focus:border-blue-600'
+                                                    },
+                                                        React.createElement('option', { value: '' }, '-- Your prediction --'),
+                                                        React.createElement('option', { value: '1' }, `${match.team1} Win`),
+                                                        React.createElement('option', { value: '0' }, 'Draw'),
+                                                        React.createElement('option', { value: '2' }, `${match.team2} Win`)
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        ),
+                        activeTab === 'results' && React.createElement('div', { className: 'bg-white/95 rounded-2xl p-8 shadow-2xl' },
+                            React.createElement('h2', { className: 'text-2xl font-bold text-blue-900 mb-6' }, 'Update Match Results'),
+                            React.createElement('div', { className: 'space-y-4' },
+                                ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'].map(group =>
+                                    React.createElement('div', { key: group },
+                                        React.createElement('h3', { className: 'text-xl font-bold text-blue-900 mb-3' }, `Group ${group}`),
+                                        React.createElement('div', { className: 'space-y-2' },
+                                            groupMatches.filter(m => m.group === group).map(match =>
+                                                React.createElement('div', { key: match.id, className: 'p-4 bg-blue-50 rounded-lg flex justify-between items-center' },
+                                                    React.createElement('div', { className: 'font-semibold text-blue-900' }, `${match.date}: ${match.team1} vs ${match.team2}`),
+                                                    React.createElement('select', {
+                                                        value: results[match.id] || '',
+                                                        onChange: (e) => setResult(match.id, e.target.value),
+                                                        className: 'px-4 py-2 border-2 border-blue-300 rounded font-semibold focus:outline-none focus:border-blue-600'
+                                                    },
+                                                        React.createElement('option', { value: '' }, 'No result'),
+                                                        React.createElement('option', { value: '1' }, `${match.team1} Won`),
+                                                        React.createElement('option', { value: '0' }, 'Draw'),
+                                                        React.createElement('option', { value: '2' }, `${match.team2} Won`)
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(React.createElement(WorldCup2026Predictor));
+    </script>
+</body>
+</html>

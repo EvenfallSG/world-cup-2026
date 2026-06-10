@@ -7,8 +7,6 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js"></script>
     <style>
         body { margin: 0; padding: 0; }
     </style>
@@ -18,29 +16,32 @@
 
     <script>
         const { useState, useEffect } = React;
-        const { initializeApp } = window.firebase;
-        const { getDatabase, ref, set, get, onValue, remove } = window.firebase.database;
+        const FIREBASE_DB_URL = "https://world-cup-2026-predictio-23e8f.firebaseio.com";
 
-        const FIREBASE_CONFIG = {
-            apiKey: "AIzaSyAn0EcY75z0zuBnpJ6R1IbfNTll5vndMv4",
-            authDomain: "world-cup-2026-predictio-23e8f.firebaseapp.com",
-            databaseURL: "https://world-cup-2026-predictio-23e8f.firebaseio.com",
-            projectId: "world-cup-2026-predictio-23e8f",
-            storageBucket: "world-cup-2026-predictio-23e8f.firebasestorage.app",
-            messagingSenderId: "265305573848",
-            appId: "1:265305573848:web:521ec31bf2dd1962ef8aad"
+        const firebaseGet = async (path) => {
+            try {
+                const response = await fetch(`${FIREBASE_DB_URL}${path}.json`);
+                if (!response.ok) throw new Error('Firebase error');
+                return await response.json();
+            } catch (error) {
+                console.error('Firebase GET error:', error);
+                return null;
+            }
         };
 
-        let db = null;
-        let firebaseInitialized = false;
-
-        try {
-            const app = initializeApp(FIREBASE_CONFIG);
-            db = getDatabase(app);
-            firebaseInitialized = true;
-        } catch (error) {
-            console.error('Firebase initialization error:', error);
-        }
+        const firebaseSet = async (path, data) => {
+            try {
+                const response = await fetch(`${FIREBASE_DB_URL}${path}.json`, {
+                    method: 'PUT',
+                    body: JSON.stringify(data)
+                });
+                if (!response.ok) throw new Error('Firebase error');
+                return true;
+            } catch (error) {
+                console.error('Firebase SET error:', error);
+                return false;
+            }
+        };
 
         const WorldCup2026Predictor = () => {
             const [players, setPlayers] = useState([]);
@@ -50,9 +51,8 @@
             const [activeTab, setActiveTab] = useState('setup');
             const [predictions, setPredictions] = useState({});
             const [results, setResults] = useState({});
-            const [specialPredictions, setSpecialPredictions] = useState({});
             const [tournamentStarted, setTournamentStarted] = useState(false);
-            const [loading, setLoading] = useState(false);
+            const [loading, setLoading] = useState(true);
             const [liveLeaderboardMode, setLiveLeaderboardMode] = useState(false);
 
             const groupMatches = [
@@ -131,34 +131,30 @@
             ];
 
             useEffect(() => {
-                if (!firebaseInitialized) return;
-                setLoading(true);
-                const dbRef = ref(db, '/');
-                onValue(dbRef, (snapshot) => {
-                    const data = snapshot.val();
-                    if (data) {
-                        if (data.players) setPlayers(Object.values(data.players));
-                        if (data.predictions) setPredictions(data.predictions);
-                        if (data.results) setResults(data.results);
-                        if (data.specialPredictions) setSpecialPredictions(data.specialPredictions);
-                        if (data.tournamentStarted) setTournamentStarted(data.tournamentStarted);
-                    }
-                    setLoading(false);
-                });
+                loadData();
+                const interval = setInterval(loadData, 2000);
+                return () => clearInterval(interval);
             }, []);
 
-            const addPlayer = async () => {
-                if (!firebaseInitialized) {
-                    alert('Firebase not configured.');
-                    return;
+            const loadData = async () => {
+                const data = await firebaseGet('/');
+                if (data) {
+                    if (data.players) setPlayers(Object.values(data.players));
+                    if (data.predictions) setPredictions(data.predictions);
+                    if (data.results) setResults(data.results);
+                    if (data.tournamentStarted) setTournamentStarted(data.tournamentStarted);
                 }
+                setLoading(false);
+            };
+
+            const addPlayer = async () => {
                 if (newPlayerName.trim()) {
                     const newPlayer = { id: Date.now().toString(), name: newPlayerName };
                     const updatedPlayers = [...players, newPlayer];
                     setPlayers(updatedPlayers);
                     const playersList = {};
                     updatedPlayers.forEach(p => { playersList[p.id] = p; });
-                    await set(ref(db, 'players'), playersList);
+                    await firebaseSet('/players', playersList);
                     setNewPlayerName('');
                 }
             };
@@ -168,13 +164,13 @@
                 setPlayers(updatedPlayers);
                 const playersList = {};
                 updatedPlayers.forEach(p => { playersList[p.id] = p; });
-                await set(ref(db, 'players'), playersList);
+                await firebaseSet('/players', playersList);
             };
 
             const startTournament = async () => {
                 if (players.length >= 3) {
                     setTournamentStarted(true);
-                    await set(ref(db, 'tournamentStarted'), true);
+                    await firebaseSet('/tournamentStarted', true);
                     setActiveTab('login');
                 }
             };
@@ -195,13 +191,13 @@
                 const key = `${playerId}-${matchId}`;
                 const updatedPredictions = { ...predictions, [key]: prediction };
                 setPredictions(updatedPredictions);
-                await set(ref(db, 'predictions'), updatedPredictions);
+                await firebaseSet('/predictions', updatedPredictions);
             };
 
             const setResult = async (matchId, result) => {
                 const updatedResults = { ...results, [matchId]: result };
                 setResults(updatedResults);
-                await set(ref(db, 'results'), updatedResults);
+                await firebaseSet('/results', updatedResults);
             };
 
             const calculateScores = () => {
@@ -287,64 +283,36 @@
                                     placeholder: 'Player name...',
                                     className: 'flex-1 px-4 py-3 border-2 border-blue-300 rounded-lg focus:outline-none focus:border-blue-600'
                                 }),
-                                React.createElement('button', {
-                                    onClick: addPlayer,
-                                    className: 'px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700'
-                                }, 'Add')
+                                React.createElement('button', { onClick: addPlayer, className: 'px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700' }, 'Add')
                             ),
                             React.createElement('div', { className: 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3' },
                                 players.map(player =>
                                     React.createElement('div', { key: player.id, className: 'flex items-center justify-between bg-blue-50 p-4 rounded-lg' },
                                         React.createElement('span', { className: 'font-semibold text-blue-900' }, player.name),
-                                        React.createElement('button', {
-                                            onClick: () => removePlayer(player.id),
-                                            className: 'text-red-500 hover:text-red-700 font-bold'
-                                        }, '✕')
+                                        React.createElement('button', { onClick: () => removePlayer(player.id), className: 'text-red-500 hover:text-red-700 font-bold' }, '✕')
                                     )
                                 )
                             ),
                             React.createElement('p', { className: 'text-sm text-gray-600 mt-4' }, `${players.length} players added`)
                         ),
-                        players.length >= 3 && React.createElement('button', {
-                            onClick: startTournament,
-                            className: 'w-full px-6 py-4 bg-gradient-to-r from-blue-600 to-green-600 text-white text-xl font-bold rounded-lg hover:shadow-xl transition'
-                        }, 'Start Tournament! 🎉')
+                        players.length >= 3 && React.createElement('button', { onClick: startTournament, className: 'w-full px-6 py-4 bg-gradient-to-r from-blue-600 to-green-600 text-white text-xl font-bold rounded-lg hover:shadow-xl transition' }, 'Start Tournament! 🎉')
                     ),
                     tournamentStarted && !currentPlayerId && React.createElement('div', { className: 'bg-white/95 rounded-2xl p-8 shadow-2xl max-w-md mx-auto' },
                         React.createElement('h2', { className: 'text-3xl font-bold text-blue-900 mb-6 text-center' }, 'Welcome!'),
                         React.createElement('p', { className: 'text-gray-600 mb-6 text-center' }, 'Select your name:'),
                         React.createElement('div', { className: 'space-y-3' },
                             players.map(player =>
-                                React.createElement('button', {
-                                    key: player.id,
-                                    onClick: () => loginPlayer(player.id, player.name),
-                                    className: 'w-full px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition'
-                                }, player.name)
+                                React.createElement('button', { key: player.id, onClick: () => loginPlayer(player.id, player.name), className: 'w-full px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition' }, player.name)
                             )
                         )
                     ),
                     tournamentStarted && currentPlayerId && React.createElement('div', null,
                         React.createElement('div', { className: 'flex gap-2 mb-6 justify-center flex-wrap' },
-                            React.createElement('button', {
-                                onClick: () => setActiveTab('predictions'),
-                                className: `px-6 py-2 rounded-lg font-semibold transition ${activeTab === 'predictions' ? 'bg-yellow-300 text-blue-900' : 'bg-white/20 text-white hover:bg-white/30'}`
-                            }, 'Predictions'),
-                            React.createElement('button', {
-                                onClick: () => setActiveTab('results'),
-                                className: `px-6 py-2 rounded-lg font-semibold transition ${activeTab === 'results' ? 'bg-yellow-300 text-blue-900' : 'bg-white/20 text-white hover:bg-white/30'}`
-                            }, 'Results'),
-                            React.createElement('button', {
-                                onClick: () => setActiveTab('leaderboard'),
-                                className: `px-6 py-2 rounded-lg font-semibold transition ${activeTab === 'leaderboard' ? 'bg-yellow-300 text-blue-900' : 'bg-white/20 text-white hover:bg-white/30'}`
-                            }, 'Leaderboard'),
-                            React.createElement('button', {
-                                onClick: () => setLiveLeaderboardMode(true),
-                                className: 'px-6 py-2 rounded-lg font-semibold transition bg-purple-500/80 text-white hover:bg-purple-600'
-                            }, '📺 Live Leaderboard'),
-                            React.createElement('button', {
-                                onClick: logout,
-                                className: 'px-6 py-2 rounded-lg font-semibold transition bg-red-500/80 text-white hover:bg-red-600'
-                            }, 'Logout')
+                            React.createElement('button', { onClick: () => setActiveTab('predictions'), className: `px-6 py-2 rounded-lg font-semibold transition ${activeTab === 'predictions' ? 'bg-yellow-300 text-blue-900' : 'bg-white/20 text-white hover:bg-white/30'}` }, 'Predictions'),
+                            React.createElement('button', { onClick: () => setActiveTab('results'), className: `px-6 py-2 rounded-lg font-semibold transition ${activeTab === 'results' ? 'bg-yellow-300 text-blue-900' : 'bg-white/20 text-white hover:bg-white/30'}` }, 'Results'),
+                            React.createElement('button', { onClick: () => setActiveTab('leaderboard'), className: `px-6 py-2 rounded-lg font-semibold transition ${activeTab === 'leaderboard' ? 'bg-yellow-300 text-blue-900' : 'bg-white/20 text-white hover:bg-white/30'}` }, 'Leaderboard'),
+                            React.createElement('button', { onClick: () => setLiveLeaderboardMode(true), className: 'px-6 py-2 rounded-lg font-semibold transition bg-purple-500/80 text-white hover:bg-purple-600' }, '📺 Live Leaderboard'),
+                            React.createElement('button', { onClick: logout, className: 'px-6 py-2 rounded-lg font-semibold transition bg-red-500/80 text-white hover:bg-red-600' }, 'Logout')
                         ),
                         activeTab === 'leaderboard' && React.createElement('div', { className: 'bg-white/95 rounded-2xl p-8 shadow-2xl' },
                             React.createElement('h2', { className: 'text-3xl font-bold text-blue-900 mb-6' }, 'Leaderboard'),
@@ -381,11 +349,7 @@
                                             groupMatches.filter(m => m.group === group).map(match =>
                                                 React.createElement('div', { key: match.id, className: 'p-4 bg-blue-50 rounded-lg' },
                                                     React.createElement('div', { className: 'font-semibold text-blue-900 mb-2' }, `${match.date}: ${match.team1} vs ${match.team2}`),
-                                                    React.createElement('select', {
-                                                        value: getPlayerPrediction(currentPlayerId, match.id) || '',
-                                                        onChange: (e) => setPrediction(currentPlayerId, match.id, e.target.value),
-                                                        className: 'w-full px-4 py-2 border-2 border-blue-300 rounded font-semibold focus:outline-none focus:border-blue-600'
-                                                    },
+                                                    React.createElement('select', { value: getPlayerPrediction(currentPlayerId, match.id) || '', onChange: (e) => setPrediction(currentPlayerId, match.id, e.target.value), className: 'w-full px-4 py-2 border-2 border-blue-300 rounded font-semibold focus:outline-none focus:border-blue-600' },
                                                         React.createElement('option', { value: '' }, '-- Your prediction --'),
                                                         React.createElement('option', { value: '1' }, `${match.team1} Win`),
                                                         React.createElement('option', { value: '0' }, 'Draw'),
@@ -408,11 +372,7 @@
                                             groupMatches.filter(m => m.group === group).map(match =>
                                                 React.createElement('div', { key: match.id, className: 'p-4 bg-blue-50 rounded-lg flex justify-between items-center' },
                                                     React.createElement('div', { className: 'font-semibold text-blue-900' }, `${match.date}: ${match.team1} vs ${match.team2}`),
-                                                    React.createElement('select', {
-                                                        value: results[match.id] || '',
-                                                        onChange: (e) => setResult(match.id, e.target.value),
-                                                        className: 'px-4 py-2 border-2 border-blue-300 rounded font-semibold focus:outline-none focus:border-blue-600'
-                                                    },
+                                                    React.createElement('select', { value: results[match.id] || '', onChange: (e) => setResult(match.id, e.target.value), className: 'px-4 py-2 border-2 border-blue-300 rounded font-semibold focus:outline-none focus:border-blue-600' },
                                                         React.createElement('option', { value: '' }, 'No result'),
                                                         React.createElement('option', { value: '1' }, `${match.team1} Won`),
                                                         React.createElement('option', { value: '0' }, 'Draw'),

@@ -9,6 +9,10 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { margin: 0; padding: 0; }
+        .bracket-container { display: flex; gap: 20px; overflow-x: auto; padding: 20px; }
+        .bracket-round { display: flex; flex-direction: column; justify-content: space-around; min-width: 200px; }
+        .bracket-match { border: 2px solid #1e40af; border-radius: 8px; padding: 10px; margin: 10px 0; background: white; }
+        .bracket-team { padding: 8px; border: 1px solid #ccc; margin: 2px 0; background: #f0f9ff; }
     </style>
 </head>
 <body>
@@ -54,10 +58,11 @@
             const [tournamentStarted, setTournamentStarted] = useState(false);
             const [loading, setLoading] = useState(true);
             const [liveLeaderboardMode, setLiveLeaderboardMode] = useState(false);
+            const [viewMode, setViewMode] = useState('list');
 
             const isRegistrationOpen = () => {
                 const today = new Date();
-                const cutoffDate = new Date(2026, 5, 12); // June 12, 2026
+                const cutoffDate = new Date(2026, 5, 12);
                 return today < cutoffDate;
             };
 
@@ -134,6 +139,24 @@
                 { id: 'L4', date: 'Jun 23', team1: 'Croatia', team2: 'Ghana', group: 'L' },
                 { id: 'L5', date: 'Jun 27', team1: 'England', team2: 'Ghana', group: 'L' },
                 { id: 'L6', date: 'Jun 27', team1: 'Panama', team2: 'Croatia', group: 'L' },
+            ];
+
+            const knockoutMatches = [
+                { id: 'RO32_1', date: 'Jun 30', team1: 'A1', team2: 'A2', stage: 'Round of 32' },
+                { id: 'RO32_2', date: 'Jun 30', team1: 'B1', team2: 'B2', stage: 'Round of 32' },
+                { id: 'RO32_3', date: 'Jul 1', team1: 'C1', team2: 'C2', stage: 'Round of 32' },
+                { id: 'RO32_4', date: 'Jul 1', team1: 'D1', team2: 'D2', stage: 'Round of 32' },
+                { id: 'RO32_5', date: 'Jul 1', team1: 'E1', team2: 'E2', stage: 'Round of 32' },
+                { id: 'RO32_6', date: 'Jul 2', team1: 'F1', team2: 'F2', stage: 'Round of 32' },
+                { id: 'RO32_7', date: 'Jul 2', team1: 'G1', team2: 'G2', stage: 'Round of 32' },
+                { id: 'RO32_8', date: 'Jul 2', team1: 'H1', team2: 'H2', stage: 'Round of 32' },
+                { id: 'QF1', date: 'Jul 5', team1: 'RO32_1', team2: 'RO32_2', stage: 'Quarterfinals' },
+                { id: 'QF2', date: 'Jul 5', team1: 'RO32_3', team2: 'RO32_4', stage: 'Quarterfinals' },
+                { id: 'QF3', date: 'Jul 6', team1: 'RO32_5', team2: 'RO32_6', stage: 'Quarterfinals' },
+                { id: 'QF4', date: 'Jul 6', team1: 'RO32_7', team2: 'RO32_8', stage: 'Quarterfinals' },
+                { id: 'SF1', date: 'Jul 9', team1: 'QF1', team2: 'QF2', stage: 'Semifinals' },
+                { id: 'SF2', date: 'Jul 10', team1: 'QF3', team2: 'QF4', stage: 'Semifinals' },
+                { id: 'FINAL', date: 'Jul 19', team1: 'SF1', team2: 'SF2', stage: 'Final' },
             ];
 
             useEffect(() => {
@@ -226,6 +249,25 @@
 
             const getPlayerPrediction = (playerId, matchId) => {
                 return predictions[`${playerId}-${matchId}`];
+            };
+
+            const getTeamName = (team) => {
+                if (team.startsWith('A')) return 'A' + team.slice(1);
+                if (team.startsWith('B')) return 'B' + team.slice(1);
+                if (team.startsWith('C')) return 'C' + team.slice(1);
+                if (team.startsWith('D')) return 'D' + team.slice(1);
+                if (team.startsWith('E')) return 'E' + team.slice(1);
+                if (team.startsWith('F')) return 'F' + team.slice(1);
+                if (team.startsWith('G')) return 'G' + team.slice(1);
+                if (team.startsWith('H')) return 'H' + team.slice(1);
+                if (team.startsWith('I')) return 'I' + team.slice(1);
+                if (team.startsWith('J')) return 'J' + team.slice(1);
+                if (team.startsWith('K')) return 'K' + team.slice(1);
+                if (team.startsWith('L')) return 'L' + team.slice(1);
+                if (team.startsWith('RO32')) return 'RO32';
+                if (team.startsWith('QF')) return 'QF';
+                if (team.startsWith('SF')) return 'SF';
+                return team;
             };
 
             if (loading) {
@@ -335,6 +377,112 @@
                             React.createElement('button', { onClick: () => setLiveLeaderboardMode(true), className: 'px-6 py-2 rounded-lg font-semibold transition bg-purple-500/80 text-white hover:bg-purple-600' }, '📺 Live Leaderboard'),
                             React.createElement('button', { onClick: logout, className: 'px-6 py-2 rounded-lg font-semibold transition bg-red-500/80 text-white hover:bg-red-600' }, 'Logout')
                         ),
+                        activeTab === 'predictions' && React.createElement('div', null,
+                            React.createElement('div', { className: 'flex gap-4 justify-center mb-4' },
+                                React.createElement('button', { onClick: () => setViewMode('list'), className: `px-6 py-2 rounded-lg font-semibold ${viewMode === 'list' ? 'bg-blue-600 text-white' : 'bg-white/20 text-white'}` }, '📋 List View'),
+                                React.createElement('button', { onClick: () => setViewMode('bracket'), className: `px-6 py-2 rounded-lg font-semibold ${viewMode === 'bracket' ? 'bg-blue-600 text-white' : 'bg-white/20 text-white'}` }, '🏆 Bracket View')
+                            ),
+                            viewMode === 'list' && React.createElement('div', { className: 'bg-white/95 rounded-2xl p-8 shadow-2xl' },
+                                React.createElement('h2', { className: 'text-2xl font-bold text-blue-900 mb-6' }, 'Match Predictions'),
+                                React.createElement('div', { className: 'space-y-4' },
+                                    ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'].map(group =>
+                                        React.createElement('div', { key: group },
+                                            React.createElement('h3', { className: 'text-xl font-bold text-blue-900 mb-3' }, `Group ${group}`),
+                                            React.createElement('div', { className: 'space-y-2' },
+                                                groupMatches.filter(m => m.group === group).map(match =>
+                                                    React.createElement('div', { key: match.id, className: 'p-4 bg-blue-50 rounded-lg' },
+                                                        React.createElement('div', { className: 'font-semibold text-blue-900 mb-2' }, `${match.date}: ${match.team1} vs ${match.team2}`),
+                                                        React.createElement('select', { value: getPlayerPrediction(currentPlayerId, match.id) || '', onChange: (e) => setPrediction(currentPlayerId, match.id, e.target.value), className: 'w-full px-4 py-2 border-2 border-blue-300 rounded font-semibold focus:outline-none focus:border-blue-600' },
+                                                            React.createElement('option', { value: '' }, '-- Your prediction --'),
+                                                            React.createElement('option', { value: '1' }, `${match.team1} Win`),
+                                                            React.createElement('option', { value: '0' }, 'Draw'),
+                                                            React.createElement('option', { value: '2' }, `${match.team2} Win`)
+                                                        )
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    ),
+                                    React.createElement('div', null,
+                                        React.createElement('h3', { className: 'text-xl font-bold text-blue-900 mb-3 mt-6' }, 'Knockout Stage'),
+                                        React.createElement('div', { className: 'space-y-2' },
+                                            knockoutMatches.map(match =>
+                                                React.createElement('div', { key: match.id, className: 'p-4 bg-blue-50 rounded-lg' },
+                                                    React.createElement('div', { className: 'font-semibold text-blue-900 mb-2' }, `${match.date} - ${match.stage}: ${getTeamName(match.team1)} vs ${getTeamName(match.team2)}`),
+                                                    React.createElement('select', { value: getPlayerPrediction(currentPlayerId, match.id) || '', onChange: (e) => setPrediction(currentPlayerId, match.id, e.target.value), className: 'w-full px-4 py-2 border-2 border-blue-300 rounded font-semibold focus:outline-none focus:border-blue-600' },
+                                                        React.createElement('option', { value: '' }, '-- Predict winner --'),
+                                                        React.createElement('option', { value: '1' }, `${getTeamName(match.team1)} Advances`),
+                                                        React.createElement('option', { value: '2' }, `${getTeamName(match.team2)} Advances`)
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            ),
+                            viewMode === 'bracket' && React.createElement('div', { className: 'bg-white/95 rounded-2xl p-8 shadow-2xl' },
+                                React.createElement('h2', { className: 'text-2xl font-bold text-blue-900 mb-6' }, '🏆 Tournament Bracket 🏆'),
+                                React.createElement('p', { className: 'text-gray-600 mb-4' }, 'Make your knockout predictions below:'),
+                                React.createElement('div', { className: 'bracket-container' },
+                                    React.createElement('div', { className: 'bracket-round' },
+                                        React.createElement('h3', { className: 'font-bold text-blue-900 mb-4' }, 'Round of 32'),
+                                        knockoutMatches.filter(m => m.stage === 'Round of 32').map(match =>
+                                            React.createElement('div', { key: match.id, className: 'bracket-match' },
+                                                React.createElement('div', { className: 'bracket-team' }, getTeamName(match.team1)),
+                                                React.createElement('select', { value: getPlayerPrediction(currentPlayerId, match.id) || '', onChange: (e) => setPrediction(currentPlayerId, match.id, e.target.value), className: 'w-full px-2 py-1 text-sm border border-blue-300 rounded' },
+                                                    React.createElement('option', { value: '' }, 'Pick'),
+                                                    React.createElement('option', { value: '1' }, 'Team 1'),
+                                                    React.createElement('option', { value: '2' }, 'Team 2')
+                                                ),
+                                                React.createElement('div', { className: 'bracket-team' }, getTeamName(match.team2))
+                                            )
+                                        )
+                                    ),
+                                    React.createElement('div', { className: 'bracket-round' },
+                                        React.createElement('h3', { className: 'font-bold text-blue-900 mb-4' }, 'Quarterfinals'),
+                                        knockoutMatches.filter(m => m.stage === 'Quarterfinals').map(match =>
+                                            React.createElement('div', { key: match.id, className: 'bracket-match' },
+                                                React.createElement('div', { className: 'bracket-team' }, getTeamName(match.team1)),
+                                                React.createElement('select', { value: getPlayerPrediction(currentPlayerId, match.id) || '', onChange: (e) => setPrediction(currentPlayerId, match.id, e.target.value), className: 'w-full px-2 py-1 text-sm border border-blue-300 rounded' },
+                                                    React.createElement('option', { value: '' }, 'Pick'),
+                                                    React.createElement('option', { value: '1' }, 'Team 1'),
+                                                    React.createElement('option', { value: '2' }, 'Team 2')
+                                                ),
+                                                React.createElement('div', { className: 'bracket-team' }, getTeamName(match.team2))
+                                            )
+                                        )
+                                    ),
+                                    React.createElement('div', { className: 'bracket-round' },
+                                        React.createElement('h3', { className: 'font-bold text-blue-900 mb-4' }, 'Semifinals'),
+                                        knockoutMatches.filter(m => m.stage === 'Semifinals').map(match =>
+                                            React.createElement('div', { key: match.id, className: 'bracket-match' },
+                                                React.createElement('div', { className: 'bracket-team' }, getTeamName(match.team1)),
+                                                React.createElement('select', { value: getPlayerPrediction(currentPlayerId, match.id) || '', onChange: (e) => setPrediction(currentPlayerId, match.id, e.target.value), className: 'w-full px-2 py-1 text-sm border border-blue-300 rounded' },
+                                                    React.createElement('option', { value: '' }, 'Pick'),
+                                                    React.createElement('option', { value: '1' }, 'Team 1'),
+                                                    React.createElement('option', { value: '2' }, 'Team 2')
+                                                ),
+                                                React.createElement('div', { className: 'bracket-team' }, getTeamName(match.team2))
+                                            )
+                                        )
+                                    ),
+                                    React.createElement('div', { className: 'bracket-round' },
+                                        React.createElement('h3', { className: 'font-bold text-blue-900 mb-4' }, 'FINAL'),
+                                        knockoutMatches.filter(m => m.stage === 'Final').map(match =>
+                                            React.createElement('div', { key: match.id, className: 'bracket-match' },
+                                                React.createElement('div', { className: 'bracket-team' }, getTeamName(match.team1)),
+                                                React.createElement('select', { value: getPlayerPrediction(currentPlayerId, match.id) || '', onChange: (e) => setPrediction(currentPlayerId, match.id, e.target.value), className: 'w-full px-2 py-1 text-sm border border-blue-300 rounded font-bold' },
+                                                    React.createElement('option', { value: '' }, 'Champion?'),
+                                                    React.createElement('option', { value: '1' }, 'Team 1'),
+                                                    React.createElement('option', { value: '2' }, 'Team 2')
+                                                ),
+                                                React.createElement('div', { className: 'bracket-team' }, getTeamName(match.team2))
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        ),
                         activeTab === 'leaderboard' && React.createElement('div', { className: 'bg-white/95 rounded-2xl p-8 shadow-2xl' },
                             React.createElement('h2', { className: 'text-3xl font-bold text-blue-900 mb-6' }, 'Leaderboard'),
                             React.createElement('div', { className: 'overflow-x-auto' },
@@ -354,29 +502,6 @@
                                                 React.createElement('td', { className: 'px-4 py-3 font-semibold text-blue-900' }, score.name),
                                                 React.createElement('td', { className: 'px-4 py-3 text-right text-2xl font-bold text-green-600' }, score.points),
                                                 React.createElement('td', { className: 'px-4 py-3 text-right text-blue-900' }, score.correctPredictions)
-                                            )
-                                        )
-                                    )
-                                )
-                            )
-                        ),
-                        activeTab === 'predictions' && React.createElement('div', { className: 'bg-white/95 rounded-2xl p-8 shadow-2xl' },
-                            React.createElement('h2', { className: 'text-2xl font-bold text-blue-900 mb-6' }, 'Match Predictions'),
-                            React.createElement('div', { className: 'space-y-4' },
-                                ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L'].map(group =>
-                                    React.createElement('div', { key: group },
-                                        React.createElement('h3', { className: 'text-xl font-bold text-blue-900 mb-3' }, `Group ${group}`),
-                                        React.createElement('div', { className: 'space-y-2' },
-                                            groupMatches.filter(m => m.group === group).map(match =>
-                                                React.createElement('div', { key: match.id, className: 'p-4 bg-blue-50 rounded-lg' },
-                                                    React.createElement('div', { className: 'font-semibold text-blue-900 mb-2' }, `${match.date}: ${match.team1} vs ${match.team2}`),
-                                                    React.createElement('select', { value: getPlayerPrediction(currentPlayerId, match.id) || '', onChange: (e) => setPrediction(currentPlayerId, match.id, e.target.value), className: 'w-full px-4 py-2 border-2 border-blue-300 rounded font-semibold focus:outline-none focus:border-blue-600' },
-                                                        React.createElement('option', { value: '' }, '-- Your prediction --'),
-                                                        React.createElement('option', { value: '1' }, `${match.team1} Win`),
-                                                        React.createElement('option', { value: '0' }, 'Draw'),
-                                                        React.createElement('option', { value: '2' }, `${match.team2} Win`)
-                                                    )
-                                                )
                                             )
                                         )
                                     )

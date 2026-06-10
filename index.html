@@ -100,7 +100,42 @@ const GM = [
   {id:"L5",t1:"England",t2:"Ghana",g:"L"},{id:"L6",t1:"Panama",t2:"Croatia",g:"L"}
 ];
 
-// Official FIFA 2026 bracket (Appendix A). T1-T8 = best third-placed teams.
+// Official FIFA 2026 bracket (Appendix A). T1-T8 = third-place slots with allowed groups.
+const THIRD_SLOTS = [
+  {slot:"T1", allowed:"ABCDF"},  // M74: 1E v 3ABCDF
+  {slot:"T2", allowed:"CDFGH"},  // M77: 1I v 3CDFGH
+  {slot:"T3", allowed:"CEFHI"},  // M79: 1A v 3CEFHI
+  {slot:"T4", allowed:"EHIJK"},  // M80: 1L v 3EHIJK
+  {slot:"T5", allowed:"BEFIJ"},  // M81: 1D v 3BEFIJ
+  {slot:"T6", allowed:"AEHIJ"},  // M82: 1G v 3AEHIJ
+  {slot:"T7", allowed:"EFGIJ"},  // M85: 1B v 3EFGIJ
+  {slot:"T8", allowed:"DEIJL"}   // M87: 1K v 3DEIJL
+];
+function assignThirds(thirds) {
+  // thirds: [{team, group}] - the 8 best third-placed teams
+  // Returns {T1: teamName, ...} respecting allowed-group constraints via backtracking
+  const result = {};
+  const used = new Array(thirds.length).fill(false);
+  function bt(slotIdx) {
+    if (slotIdx === THIRD_SLOTS.length) return true;
+    const slot = THIRD_SLOTS[slotIdx];
+    for (let i = 0; i < thirds.length; i++) {
+      if (used[i]) continue;
+      if (slot.allowed.indexOf(thirds[i].group) === -1) continue;
+      used[i] = true;
+      result[slot.slot] = thirds[i].team;
+      if (bt(slotIdx + 1)) return true;
+      used[i] = false;
+      delete result[slot.slot];
+    }
+    return false;
+  }
+  if (!bt(0)) {
+    // Fallback: assign in order if constraints unsatisfiable
+    THIRD_SLOTS.forEach((s, i) => { result[s.slot] = thirds[i] ? thirds[i].team : null; });
+  }
+  return result;
+}
 const R32 = [
   {id:"M73",s1:"2A",s2:"2B",d:"Jun 28"},
   {id:"M74",s1:"1E",s2:"T1",d:"Jun 28"},
@@ -170,7 +205,7 @@ function calcStandings(pid, preds) {
       return b.gf - a.gf;
     });
     q[g] = {first: st[g][0] ? st[g][0].team : null, second: st[g][1] ? st[g][1].team : null};
-    if (st[g][2] && st[g][2].played > 0) thirds.push(st[g][2]);
+    if (st[g][2] && st[g][2].played > 0) thirds.push({team: st[g][2].team, group: g, pts: st[g][2].pts, gf: st[g][2].gf, ga: st[g][2].ga});
   });
   thirds.sort((a, b) => {
     if (b.pts !== a.pts) return b.pts - a.pts;
@@ -178,7 +213,7 @@ function calcStandings(pid, preds) {
     if (gdb !== gda) return gdb - gda;
     return b.gf - a.gf;
   });
-  const bestThirds = thirds.slice(0, 8).map(t => t.team);
+  const bestThirds = thirds.slice(0, 8);
   return {standings: st, qualified: q, bestThirds: bestThirds};
 }
 
@@ -284,7 +319,24 @@ function App() {
   };
 
   const getPred = (mid) => preds[activeId + "-" + mid] || "";
-  const gKO = (mid) => preds[activeId + "-" + mid] || null;
+  // Validated knockout winner resolver: returns the pick ONLY if it's still one of the two valid teams
+  const koTeams = {};
+  const resolveKO = (mid) => {
+    if (koTeams[mid] !== undefined) return koTeams[mid];
+    let t1 = null, t2 = null;
+    const r32 = R32.find(m => m.id === mid);
+    if (r32) { t1 = slotsRef.current[r32.s1]; t2 = slotsRef.current[r32.s2]; }
+    else {
+      const m = R16.find(x => x.id === mid) || QF.find(x => x.id === mid) || SF.find(x => x.id === mid);
+      if (m) { t1 = resolveKO(m.f1); t2 = resolveKO(m.f2); }
+      else if (mid === "M104") { t1 = resolveKO("M101"); t2 = resolveKO("M102"); }
+    }
+    const pick = preds[activeId + "-" + mid] || null;
+    const valid = (pick && (pick === t1 || pick === t2)) ? pick : null;
+    koTeams[mid] = valid;
+    return valid;
+  };
+  const gKO = (mid) => resolveKO(mid);
 
   const calcResult = useMemo(
     () => activeId ? calcStandings(activeId, preds) : {standings: {}, qualified: {}, bestThirds: []},
@@ -294,6 +346,7 @@ function App() {
   const qualified = calcResult.qualified;
   const bestThirds = calcResult.bestThirds || [];
 
+  const slotsRef = useRef({});
   const slots = useMemo(() => {
     if (!activeId) return {};
     const s = {};
@@ -301,9 +354,13 @@ function App() {
       s["1" + g] = qualified[g].first;
       s["2" + g] = qualified[g].second;
     });
-    for (let i = 0; i < 8; i++) {
-      s["T" + (i + 1)] = bestThirds[i] || null;
+    if (bestThirds.length === 8) {
+      const assigned = assignThirds(bestThirds);
+      Object.keys(assigned).forEach(k => { s[k] = assigned[k]; });
+    } else {
+      for (let i = 0; i < 8; i++) { s["T" + (i + 1)] = null; }
     }
+    slotsRef.current = s;
     return s;
   }, [qualified, bestThirds, activeId]);
 
@@ -313,20 +370,27 @@ function App() {
     const pr = getPred(props.mid);
     const opts = [props.t1, props.t2].filter(Boolean);
     let action;
+    const validPick = opts.indexOf(pr) !== -1 ? pr : "";
     if (opts.length === 2 && !isRO) {
-      action = e("select", {value: pr, onChange: ev => setKO(props.mid, ev.target.value), className: "bsel"},
+      action = e("select", {value: validPick, onChange: ev => setKO(props.mid, ev.target.value), className: "bsel"},
         e("option", {value: ""}, props.isF ? "Pick champion" : "Pick winner"),
         opts.map(t => e("option", {key: t, value: t}, t))
       );
     } else if (opts.length === 2 && isRO) {
       action = e("div", {className: "bdisabled"}, pr ? "Picked: " + pr : "No pick yet");
     } else {
-      action = e("div", {className: "bdisabled"}, opts.length === 0 ? "Complete groups first" : "Waiting...");
+      let msg;
+      if (props.waitingOn) {
+        msg = "Pick " + props.waitingOn + " winners first";
+      } else {
+        msg = "Complete all group scores first";
+      }
+      action = e("div", {className: "bdisabled"}, msg);
     }
     return e("div", {className: "bmatch", key: props.mid},
-      e("div", {className: "bteam" + (pr === props.t1 && props.t1 ? " won" : !props.t1 ? " tbd" : "")}, props.t1 || "TBD"),
+      e("div", {className: "bteam" + (validPick === props.t1 && props.t1 ? " won" : !props.t1 ? " tbd" : "")}, props.t1 || "TBD"),
       e("div", {className: "bvs"}, props.label + " - " + props.date),
-      e("div", {className: "bteam" + (pr === props.t2 && props.t2 ? " won" : !props.t2 ? " tbd" : "")}, props.t2 || "TBD"),
+      e("div", {className: "bteam" + (validPick === props.t2 && props.t2 ? " won" : !props.t2 ? " tbd" : "")}, props.t2 || "TBD"),
       action
     );
   };
@@ -538,25 +602,25 @@ function App() {
             e("div", {className: "bcol"},
               e("div", {className: "bcolh"}, "ROUND OF 16"),
               e("div", {className: "bmatches"},
-                R16.map(m => renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id}))
+                R16.map(m => renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id, waitingOn: m.f1 + " & " + m.f2}))
               )
             ),
             e("div", {className: "bcol"},
               e("div", {className: "bcolh"}, "QUARTER FINALS"),
               e("div", {className: "bmatches"},
-                QF.map(m => renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id}))
+                QF.map(m => renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id, waitingOn: m.f1 + " & " + m.f2}))
               )
             ),
             e("div", {className: "bcol"},
               e("div", {className: "bcolh"}, "SEMI FINALS"),
               e("div", {className: "bmatches"},
-                SF.map(m => renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id}))
+                SF.map(m => renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id, waitingOn: m.f1 + " & " + m.f2}))
               )
             ),
             e("div", {className: "bcol"},
               e("div", {className: "bcolh final"}, "FINAL - Jul 19"),
               e("div", {className: "bmatches", style: {justifyContent: "center"}},
-                renderBMatch({mid: "M104", t1: gKO("M101"), t2: gKO("M102"), date: "Jul 19", label: "M104 FINAL", isF: true})
+                renderBMatch({mid: "M104", t1: gKO("M101"), t2: gKO("M102"), date: "Jul 19", label: "M104 FINAL", isF: true, waitingOn: "M101 & M102"})
               )
             )
           )

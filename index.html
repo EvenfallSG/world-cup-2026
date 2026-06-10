@@ -7,22 +7,45 @@
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
-body{margin:0;padding:0;}
+body{margin:0;padding:0;font-family:'Inter',system-ui,sans-serif;}
+.wc-bg{background:
+  radial-gradient(1100px 600px at 85% -10%, rgba(56,189,248,.22), transparent 60%),
+  radial-gradient(900px 550px at -10% 110%, rgba(52,211,153,.16), transparent 55%),
+  radial-gradient(700px 400px at 50% 50%, rgba(251,191,36,.05), transparent 60%),
+  linear-gradient(135deg,#091a36 0%,#0e2b5c 45%,#0a4438 100%);}
+.wc-title{font-family:'Bebas Neue',sans-serif;letter-spacing:4px;font-weight:400;
+  text-shadow:0 2px 24px rgba(251,191,36,.25), 0 1px 2px rgba(0,0,0,.4);}
+.wc-card{background:rgba(255,255,255,.96);backdrop-filter:blur(10px);
+  border:1px solid rgba(255,255,255,.55);box-shadow:0 24px 60px rgba(3,12,32,.45);}
+.wc-tab{transition:all .18s ease;letter-spacing:.3px;}
+.wc-tab-on{background:linear-gradient(120deg,#fbbf24,#f59e0b);color:#0c1f3f;
+  box-shadow:0 4px 14px rgba(245,158,11,.45);transform:translateY(-1px);}
+.wc-tab:hover{transform:translateY(-1px);}
+input,select{transition:border-color .15s ease, box-shadow .15s ease;}
+input:focus,select:focus{box-shadow:0 0 0 3px rgba(59,130,246,.18);}
+button{transition:all .15s ease;}
 .bscroll{overflow-x:auto;overflow-y:hidden;width:100%;max-width:100%;padding-bottom:12px;-webkit-overflow-scrolling:touch;}
 .bwrap{display:flex;gap:8px;width:max-content;}
 .bcol{display:flex;flex-direction:column;flex:0 0 170px;width:170px;}
-.bcolh{text-align:center;font-weight:800;font-size:12px;color:#1e40af;background:#dbeafe;padding:8px 4px;border-radius:8px;margin-bottom:8px;}
-.bcolh.final{background:#fef08a;color:#92400e;}
+.bcolh{text-align:center;font-weight:800;font-size:11px;letter-spacing:1.5px;color:#dbeafe;background:rgba(30,64,175,.85);padding:9px 4px;border-radius:8px;margin-bottom:8px;}
+.bcolh.final{background:linear-gradient(120deg,#fbbf24,#f59e0b);color:#3b2403;}
 .bmatches{display:flex;flex-direction:column;flex:1;justify-content:space-around;gap:6px;}
-.bmatch{border:2px solid #1e40af;border-radius:8px;overflow:hidden;background:white;box-shadow:0 1px 4px rgba(0,0,0,.1);}
+.bmatch{border:1.5px solid #2a4a8f;border-radius:10px;overflow:hidden;background:white;box-shadow:0 3px 10px rgba(3,12,32,.12);transition:box-shadow .18s ease, transform .18s ease;}
+.bmatch:hover{box-shadow:0 8px 22px rgba(3,12,32,.22);transform:translateY(-1px);}
 .bteam{padding:7px 8px;font-size:12px;font-weight:600;color:#1e3a5f;background:#f0f9ff;border-bottom:1px solid #e2e8f0;}
-.bteam.won{background:#bbf7d0;color:#065f46;}
+.bteam.won{background:linear-gradient(90deg,#bbf7d0,#6ee7b7);color:#065f46;}
 .bteam.tbd{color:#94a3b8;font-style:italic;}
 .bvs{padding:3px 8px;font-size:10px;text-align:center;color:#64748b;background:white;}
 .bsel{width:100%;padding:5px 6px;font-size:11px;border:none;border-top:1px solid #e2e8f0;background:#fefce8;color:#1e3a5f;font-weight:600;cursor:pointer;}
 .bsel:focus{outline:none;background:#fef08a;}
 .bdisabled{padding:5px 6px;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;text-align:center;font-style:italic;}
+.bscroll::-webkit-scrollbar{height:10px;}
+.bscroll::-webkit-scrollbar-track{background:rgba(30,64,175,.08);border-radius:6px;}
+.bscroll::-webkit-scrollbar-thumb{background:linear-gradient(90deg,#3b82f6,#10b981);border-radius:6px;}
 </style>
 </head>
 <body>
@@ -60,6 +83,8 @@ const GT = {
   K:["Colombia","Uzbekistan","Portugal","Congo DR"],
   L:["England","Croatia","Ghana","Panama"]
 };
+
+const ALL_TEAMS = Object.values(GT).reduce((a, b) => a.concat(b), []).sort();
 
 const GM = [
   {id:"A1",t1:"Mexico",t2:"South Africa",g:"A"},{id:"A2",t1:"South Korea",t2:"Czechia",g:"A"},
@@ -236,7 +261,7 @@ function App() {
   const [viewId, setViewId] = useState(null);
   const recentEdits = useRef({});
 
-  const regOpen = () => new Date() < new Date(2026, 5, 12);
+  const regOpen = () => new Date() < new Date(2026, 5, 18);
   const activeId = viewId || pid;
   const isRO = !!(viewId && viewId !== pid);
 
@@ -415,17 +440,17 @@ function App() {
   const Tab = (l, t) => e("button", {
     key: t,
     onClick: () => setTab(t),
-    className: "px-4 py-2 rounded-lg font-semibold text-sm " + (tab === t ? "bg-yellow-300 text-blue-900" : "bg-white/20 text-white hover:bg-white/30")
+    className: "wc-tab px-4 py-2 rounded-lg font-semibold text-sm " + (tab === t ? "wc-tab-on" : "bg-white/15 text-white hover:bg-white/25")
   }, l);
 
   if (loading) {
-    return e("div", {className: "min-h-screen flex items-center justify-center bg-blue-900"},
+    return e("div", {className: "min-h-screen flex items-center justify-center wc-bg"},
       e("div", {className: "text-white text-3xl font-bold"}, "Loading...")
     );
   }
 
   if (live) {
-    return e("div", {className: "min-h-screen bg-gradient-to-br from-blue-900 to-green-800 p-8"},
+    return e("div", {className: "min-h-screen wc-bg p-8"},
       e("div", {className: "max-w-4xl mx-auto"},
         e("h1", {className: "text-5xl font-bold text-white text-center mb-8"}, "LIVE LEADERBOARD"),
         e("div", {className: "bg-white rounded-3xl p-8 shadow-2xl"},
@@ -453,7 +478,7 @@ function App() {
   // SETUP VIEW
   let mainView = null;
   if (!started) {
-    mainView = e("div", {className: "bg-white/95 rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto"},
+    mainView = e("div", {className: "wc-card rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto"},
       e("h2", {className: "text-2xl font-bold text-blue-900 mb-6"}, "Tournament Setup"),
       e("div", {className: "flex gap-2 mb-4"},
         e("input", {
@@ -482,7 +507,7 @@ function App() {
     );
   } else if (!pid) {
     // LOGIN VIEW
-    mainView = e("div", {className: "bg-white/95 rounded-2xl p-8 shadow-2xl max-w-md mx-auto"},
+    mainView = e("div", {className: "wc-card rounded-2xl p-8 shadow-2xl max-w-md mx-auto"},
       e("h2", {className: "text-2xl font-bold text-blue-900 mb-6 text-center"}, "Welcome!"),
       regOpen() ?
         e("div", {className: "mb-6"},
@@ -497,7 +522,7 @@ function App() {
             }),
             e("button", {onClick: addPlayer, className: "px-5 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700"}, "Join")
           ),
-          e("p", {className: "text-xs text-gray-400 text-center mt-2"}, "Registration closes June 12")
+          e("p", {className: "text-xs text-gray-400 text-center mt-2"}, "Registration closes June 18")
         ) :
         e("p", {className: "text-center text-red-500 font-bold mb-4"}, "Registration closed"),
       e("p", {className: "text-gray-600 font-semibold mb-3 text-center"}, "Select your name:"),
@@ -515,7 +540,7 @@ function App() {
     let tabContent = null;
 
     if (tab === "group") {
-      tabContent = e("div", {className: "bg-white/95 rounded-2xl p-6 shadow-2xl"},
+      tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
         e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Group Predictions"),
         e("p", {className: "text-gray-500 text-sm mb-6"}, 'Enter scores as "2-1". Your bracket auto-populates from these.'),
         e("div", {className: "bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-xl p-4 mb-6"},
@@ -564,8 +589,56 @@ function App() {
           )
         )
       );
+    } else if (tab === "quick") {
+      const teamSel = (lbl, key, accent) => e("div", {key: key},
+        e("label", {className: "block text-sm font-bold mb-1 " + (accent || "text-blue-900")}, lbl),
+        e("select", {
+          value: getPred(key),
+          onChange: ev => setKO(key, ev.target.value),
+          disabled: isRO,
+          className: "w-full px-3 py-2 border-2 border-blue-300 rounded-lg text-sm bg-white focus:outline-none focus:border-blue-600"
+        },
+          e("option", {value: ""}, "Select team..."),
+          ALL_TEAMS.map(t => e("option", {key: t, value: t}, t))
+        )
+      );
+      tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
+        e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Quick Picks"),
+        e("p", {className: "text-gray-500 text-sm mb-6"}, "The casual route: call the podium and the individual awards. No bracket required."),
+        e("div", {className: "max-w-xl"},
+          e("div", {className: "grid grid-cols-1 md:grid-cols-2 gap-4 mb-6"},
+            teamSel("CHAMPION", "QP_WIN", "text-amber-600"),
+            teamSel("Runner-up", "QP_RUN"),
+            teamSel("Third Place", "QP_3RD"),
+            teamSel("Fourth Place", "QP_4TH")
+          ),
+          e("div", {className: "bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-xl p-4"},
+            e("h3", {className: "text-base font-bold text-orange-700 mb-3"}, "Individual Awards"),
+            e("div", {className: "grid grid-cols-1 md:grid-cols-2 gap-4"},
+              e("div", null,
+                e("label", {className: "block text-sm font-bold text-orange-700 mb-1"}, "Golden Boot (Top Scorer)"),
+                e("input", {
+                  type: "text", value: getPred("GOLDEN_BOOT"),
+                  onChange: ev => setPred("GOLDEN_BOOT", ev.target.value),
+                  readOnly: isRO, placeholder: "e.g. Mbappe",
+                  className: "w-full px-3 py-2 border-2 border-orange-300 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-white"
+                })
+              ),
+              e("div", null,
+                e("label", {className: "block text-sm font-bold text-orange-700 mb-1"}, "Tournament MVP"),
+                e("input", {
+                  type: "text", value: getPred("MVP"),
+                  onChange: ev => setPred("MVP", ev.target.value),
+                  readOnly: isRO, placeholder: "e.g. Vinicius Jr",
+                  className: "w-full px-3 py-2 border-2 border-orange-300 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-white"
+                })
+              )
+            )
+          )
+        )
+      );
     } else if (tab === "standings") {
-      tabContent = e("div", {className: "bg-white/95 rounded-2xl p-6 shadow-2xl"},
+      tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
         e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Predicted Standings"),
         e("p", {className: "text-gray-500 text-sm mb-6"}, "Green = qualified (top 2). Tiebreakers: GD then GF."),
         e("div", {className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"},
@@ -605,7 +678,7 @@ function App() {
         )
       );
     } else if (tab === "bracket") {
-      tabContent = e("div", {className: "bg-white/95 rounded-2xl p-6 shadow-2xl"},
+      tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
         e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Tournament Bracket"),
         e("p", {className: "text-gray-500 text-sm mb-4"}, "Official FIFA format: 12 group winners + 12 runners-up + 8 best third-placed teams. Teams auto-fill from your group predictions."),
         (() => {
@@ -668,6 +741,7 @@ function App() {
 
     mainView = e("div", null,
       e("div", {className: "flex gap-2 mb-6 justify-center flex-wrap"},
+        Tab("Quick Picks", "quick"),
         Tab("Groups", "group"),
         Tab("Standings", "standings"),
         Tab("Bracket", "bracket"),
@@ -676,7 +750,7 @@ function App() {
       ),
       e("div", {className: "flex gap-4 items-start"},
         e("div", {className: "hidden md:block w-48 flex-shrink-0"},
-          e("div", {className: "bg-white/95 rounded-2xl p-4 shadow-2xl"},
+          e("div", {className: "wc-card rounded-2xl p-4 shadow-2xl"},
             e("h3", {className: "text-sm font-bold text-blue-900 mb-3 border-b border-blue-200 pb-2"}, "Players"),
             e("div", {className: "space-y-1"},
               players.map(p =>
@@ -706,11 +780,30 @@ function App() {
     );
   }
 
-  return e("div", {className: "min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-green-800 p-4 md:p-6"},
+  if (started && pid && !preds[pid + "-MODE"]) {
+    const choose = (mode, t) => { setKO("MODE", mode); setTab(t); };
+    mainView = e("div", {className: "wc-card rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto text-center"},
+      e("h2", {className: "text-3xl font-bold text-blue-900 mb-2"}, "Welcome, " + pname + "!"),
+      e("p", {className: "text-gray-500 mb-8"}, "How do you want to play?"),
+      e("div", {className: "grid grid-cols-1 md:grid-cols-2 gap-4"},
+        e("button", {onClick: () => choose("full", "group"), className: "p-6 rounded-xl border-2 border-blue-300 bg-blue-50 hover:border-blue-600 hover:shadow-lg transition text-left"},
+          e("div", {className: "text-xl font-bold text-blue-900 mb-2"}, "Full Bracket"),
+          e("div", {className: "text-sm text-gray-600"}, "Predict all 72 group scores, then pick every knockout match through to the Final. Maximum bragging rights.")
+        ),
+        e("button", {onClick: () => choose("quick", "quick"), className: "p-6 rounded-xl border-2 border-amber-400 bg-amber-50 hover:border-amber-500 hover:shadow-lg transition text-left"},
+          e("div", {className: "text-xl font-bold text-amber-700 mb-2"}, "Quick Picks"),
+          e("div", {className: "text-sm text-gray-600"}, "Short on time? Just call the Champion, Runner-up, 3rd and 4th place, plus Golden Boot and MVP.")
+        )
+      ),
+      e("p", {className: "text-xs text-gray-400 mt-6"}, "Not locked in - you can do both at any time using the tabs.")
+    );
+  }
+
+  return e("div", {className: "min-h-screen wc-bg p-4 md:p-6"},
     e("div", {className: "max-w-7xl mx-auto"},
       e("div", {className: "text-center mb-6"},
-        e("h1", {className: "text-4xl md:text-5xl font-bold text-white"}, "FIFA World Cup 2026"),
-        e("p", {className: "text-blue-100 mt-1"}, "Prediction Tracker")
+        e("h1", {className: "wc-title text-5xl md:text-6xl text-white"}, "FIFA WORLD CUP 2026"),
+        e("p", {className: "text-amber-300 mt-1 text-xs font-bold", style: {letterSpacing: "5px", textTransform: "uppercase"}}, "Prediction Tracker")
       ),
       mainView
     )

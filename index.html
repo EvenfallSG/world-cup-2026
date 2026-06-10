@@ -326,6 +326,14 @@ function App() {
   const getPred = (mid) => preds[activeId + "-" + mid] || "";
   // Validated knockout winner resolver: returns the pick ONLY if it's still one of the two valid teams
   const koTeams = {};
+  const sfLoser = (sfId) => {
+    const m = SF.find(x => x.id === sfId);
+    if (!m) return null;
+    const a = resolveKO(m.f1), b = resolveKO(m.f2);
+    const w = resolveKO(sfId);
+    if (!a || !b || !w) return null;
+    return w === a ? b : a;
+  };
   const resolveKO = (mid) => {
     if (koTeams[mid] !== undefined) return koTeams[mid];
     let t1 = null, t2 = null;
@@ -335,6 +343,10 @@ function App() {
       const m = R16.find(x => x.id === mid) || QF.find(x => x.id === mid) || SF.find(x => x.id === mid);
       if (m) { t1 = resolveKO(m.f1); t2 = resolveKO(m.f2); }
       else if (mid === "M104") { t1 = resolveKO("M101"); t2 = resolveKO("M102"); }
+      else if (mid === "M103") {
+        const l1 = sfLoser("M101"), l2 = sfLoser("M102");
+        t1 = l1; t2 = l2;
+      }
     }
     const pick = preds[activeId + "-" + mid] || null;
     const valid = (pick && (pick === t1 || pick === t2)) ? pick : null;
@@ -616,7 +628,34 @@ function App() {
               col("R16", P1_R16.map(id => kom(R16, id))),
               col("QF", P1_QF.map(id => kom(QF, id))),
               col("SF", [kom(SF, "M101")]),
-              col("FINAL - Jul 19", [renderBMatch({mid: "M104", t1: gKO("M101"), t2: gKO("M102"), date: "Jul 19", label: "M104", isF: true, waitingOn: "M101 & M102"})], true),
+              (() => {
+                const finalT1 = gKO("M101"), finalT2 = gKO("M102");
+                const champ = gKO("M104");
+                const runner = (champ && finalT1 && finalT2) ? (champ === finalT1 ? finalT2 : finalT1) : null;
+                const third = gKO("M103");
+                const row = (lbl, val, hl) => e("div", {key: lbl, style: {display: "flex", justifyContent: "space-between", padding: "4px 6px", borderRadius: "5px", marginBottom: "2px", background: hl || "transparent"}},
+                  e("span", {style: {fontWeight: 700, color: "#92400e", fontSize: "11px"}}, lbl),
+                  e("span", {style: {fontWeight: 700, color: val ? "#1e3a5f" : "#b8b8b8", fontSize: "11px", fontStyle: val ? "normal" : "italic"}}, val || "TBD")
+                );
+                const podium = e("div", {key: "podium", style: {marginTop: "12px", border: "2px solid #f59e0b", borderRadius: "8px", background: "#fffbeb", padding: "8px"}},
+                  e("div", {style: {fontWeight: 800, color: "#92400e", textAlign: "center", marginBottom: "6px", fontSize: "12px"}}, "PODIUM"),
+                  row("1st CHAMPION", champ, "#fde68a"),
+                  row("2nd Runner-up", runner, "#e5e7eb"),
+                  row("3rd Place", third, "#fed7aa"),
+                  e("div", {style: {borderTop: "1px dashed #f59e0b", margin: "6px 0"}}),
+                  row("Golden Boot", getPred("GOLDEN_BOOT")),
+                  row("MVP", getPred("MVP"))
+                );
+                const bronze = e("div", {key: "bronzewrap", style: {marginTop: "12px"}},
+                  e("div", {style: {textAlign: "center", fontWeight: 800, fontSize: "11px", color: "#92400e", background: "#fed7aa", borderRadius: "6px", padding: "4px", marginBottom: "6px"}}, "BRONZE FINAL - Jul 18"),
+                  renderBMatch({mid: "M103", t1: sfLoser("M101"), t2: sfLoser("M102"), date: "Jul 18", label: "M103", waitingOn: "M101 & M102"})
+                );
+                return col("FINAL - Jul 19", [
+                  renderBMatch({key: "M104", mid: "M104", t1: finalT1, t2: finalT2, date: "Jul 19", label: "M104", isF: true, waitingOn: "M101 & M102"}),
+                  bronze,
+                  podium
+                ], true);
+              })(),
               col("SF", [kom(SF, "M102")]),
               col("QF", P2_QF.map(id => kom(QF, id))),
               col("R16", P2_R16.map(id => kom(R16, id))),

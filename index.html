@@ -174,6 +174,11 @@ const SF = [
   {id:"M101",f1:"M97",f2:"M98",d:"Jul 14"},
   {id:"M102",f1:"M99",f2:"M100",d:"Jul 15"}
 ];
+// Display order: adjacent pairs feed the match next to them (matches official flowchart)
+const R32_ORDER = ["M74","M77","M73","M75","M83","M84","M81","M82","M76","M78","M79","M80","M86","M88","M85","M87"];
+const R16_ORDER = ["M89","M90","M93","M94","M91","M92","M95","M96"];
+const QF_ORDER = ["M97","M98","M99","M100"];
+const orderBy = (arr, order) => order.map(id => arr.find(m => m.id === id));
 
 function calcStandings(pid, preds) {
   const st = {};
@@ -596,19 +601,19 @@ function App() {
             e("div", {className: "bcol"},
               e("div", {className: "bcolh"}, "ROUND OF 32"),
               e("div", {className: "bmatches"},
-                R32.map(m => renderBMatch({key: m.id, mid: m.id, t1: slots[m.s1], t2: slots[m.s2], date: m.d, label: m.id}))
+                orderBy(R32, R32_ORDER).map(m => renderBMatch({key: m.id, mid: m.id, t1: slots[m.s1], t2: slots[m.s2], date: m.d, label: m.id}))
               )
             ),
             e("div", {className: "bcol"},
               e("div", {className: "bcolh"}, "ROUND OF 16"),
               e("div", {className: "bmatches"},
-                R16.map(m => renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id, waitingOn: m.f1 + " & " + m.f2}))
+                orderBy(R16, R16_ORDER).map(m => renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id, waitingOn: m.f1 + " & " + m.f2}))
               )
             ),
             e("div", {className: "bcol"},
               e("div", {className: "bcolh"}, "QUARTER FINALS"),
               e("div", {className: "bmatches"},
-                QF.map(m => renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id, waitingOn: m.f1 + " & " + m.f2}))
+                orderBy(QF, QF_ORDER).map(m => renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id, waitingOn: m.f1 + " & " + m.f2}))
               )
             ),
             e("div", {className: "bcol"},

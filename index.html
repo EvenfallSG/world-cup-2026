@@ -55,6 +55,12 @@
             const [loading, setLoading] = useState(true);
             const [liveLeaderboardMode, setLiveLeaderboardMode] = useState(false);
 
+            const isRegistrationOpen = () => {
+                const today = new Date();
+                const cutoffDate = new Date(2026, 5, 12); // June 12, 2026
+                return today < cutoffDate;
+            };
+
             const groupMatches = [
                 { id: 'A1', date: 'Jun 11', team1: 'Mexico', team2: 'South Africa', group: 'A' },
                 { id: 'A2', date: 'Jun 11', team1: 'South Korea', team2: 'Czechia', group: 'A' },
@@ -297,9 +303,24 @@
                         ),
                         players.length >= 3 && React.createElement('button', { onClick: startTournament, className: 'w-full px-6 py-4 bg-gradient-to-r from-blue-600 to-green-600 text-white text-xl font-bold rounded-lg hover:shadow-xl transition' }, 'Start Tournament! 🎉')
                     ),
-                    tournamentStarted && !currentPlayerId && React.createElement('div', { className: 'bg-white/95 rounded-2xl p-8 shadow-2xl max-w-md mx-auto' },
+                    tournamentStarted && !currentPlayerId && React.createElement('div', { className: 'bg-white/95 rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto' },
                         React.createElement('h2', { className: 'text-3xl font-bold text-blue-900 mb-6 text-center' }, 'Welcome!'),
-                        React.createElement('p', { className: 'text-gray-600 mb-6 text-center' }, 'Select your name:'),
+                        isRegistrationOpen() ? React.createElement('div', null,
+                            React.createElement('p', { className: 'text-gray-600 mb-4 text-center font-semibold' }, 'New player? Add your name below:'),
+                            React.createElement('div', { className: 'flex gap-2 mb-6' },
+                                React.createElement('input', {
+                                    type: 'text',
+                                    value: newPlayerName,
+                                    onChange: (e) => setNewPlayerName(e.target.value),
+                                    onKeyPress: (e) => e.key === 'Enter' && addPlayer(),
+                                    placeholder: 'Your name...',
+                                    className: 'flex-1 px-4 py-3 border-2 border-blue-300 rounded-lg focus:outline-none focus:border-blue-600'
+                                }),
+                                React.createElement('button', { onClick: addPlayer, className: 'px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700' }, 'Add Me')
+                            ),
+                            React.createElement('p', { className: 'text-sm text-gray-500 text-center mb-6' }, '⏰ Registration closes June 12')
+                        ) : React.createElement('p', { className: 'text-center text-red-600 font-bold text-lg mb-6' }, '🔒 Registration Closed - Tournament in Progress'),
+                        React.createElement('p', { className: 'text-gray-600 mb-6 text-center font-semibold' }, 'Existing player? Select your name:'),
                         React.createElement('div', { className: 'space-y-3' },
                             players.map(player =>
                                 React.createElement('button', { key: player.id, onClick: () => loginPlayer(player.id, player.name), className: 'w-full px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition' }, player.name)

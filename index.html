@@ -76,6 +76,90 @@ const fbSetKey = async (key, val) => {
     return r.ok;
   } catch { return false; }
 };
+const fbSetResult = async (key, val) => {
+  try {
+    const r = await fetch(DB + "/results/" + encodeURIComponent(key) + ".json", {method: "PUT", body: JSON.stringify(val)});
+    return r.ok;
+  } catch { return false; }
+};
+
+// ---- SCORING RULES ----
+// Group stage: 3pts exact score, 1pt correct outcome (W/D/L)
+// Knockout: 2pts correct winner
+// Quick Picks: Champion=5, Runner-up=3, 3rd=2, 4th=1
+// Golden Boot / MVP: 3pts each
+const SCORE_EXACT = 3, SCORE_OUTCOME = 1, SCORE_KO = 2;
+const SCORE_QP = {QP_WIN:5, QP_RUN:3, QP_3RD:2, QP_4TH:1, GOLDEN_BOOT:3, MVP:3};
+
+function getOutcome(score) {
+  // score like "2-1" → "home" | "away" | "draw" | null
+  if (!score || !score.includes("-")) return null;
+  const [g1, g2] = score.split("-").map(Number);
+  if (isNaN(g1) || isNaN(g2)) return null;
+  if (g1 > g2) return "home";
+  if (g1 < g2) return "away";
+  return "draw";
+}
+
+function calcPlayerScore(pid, preds, results, players) {
+  // results: { [matchId]: "2-1" or teamName for KO, GOLDEN_BOOT, MVP, QP_WIN/RUN/3RD/4TH }
+  let total = 0;
+  const breakdown = { groupExact:0, groupOutcome:0, koCorrect:0, qpPoints:0, awardPoints:0 };
+
+  // Group matches
+  GM.forEach(m => {
+    const actual = results[m.id];
+    const pred   = preds[pid + "-" + m.id];
+    if (!actual || !pred) return;
+    if (actual === pred) { total += SCORE_EXACT; breakdown.groupExact += SCORE_EXACT; return; }
+    if (getOutcome(actual) && getOutcome(actual) === getOutcome(pred)) {
+      total += SCORE_OUTCOME; breakdown.groupOutcome += SCORE_OUTCOME;
+    }
+  });
+
+  // Knockout matches (M73–M104): result stored as winning team name
+  const KO_IDS = [...R32, ...R16, ...QF, ...SF, {id:"M103"}, {id:"M104"}].map(m => m.id);
+  KO_IDS.forEach(mid => {
+    const actual = results[mid];
+    const pred   = preds[pid + "-" + mid];
+    if (!actual || !pred) return;
+    if (actual === pred) { total += SCORE_KO; breakdown.koCorrect += SCORE_KO; }
+  });
+
+  // Quick picks + awards
+  const myMode = preds[pid + "-MODE"];
+  const qpKeys = Object.keys(SCORE_QP);
+  qpKeys.forEach(key => {
+    const actual = results[key]; // e.g. results["QP_WIN"] = "Brazil"
+    if (!actual) return;
+    // For Full-bracket players, check bracket picks for podium equivalent
+    let pred;
+    if (myMode === "quick") {
+      pred = preds[pid + "-" + key];
+    } else {
+      // Full-bracket: QP_WIN uses M104 pick, QP_RUN derived, QP_3RD uses M103 pick
+      if (key === "QP_WIN") pred = preds[pid + "-M104"];
+      else if (key === "QP_3RD") pred = preds[pid + "-M103"];
+      else if (key === "GOLDEN_BOOT" || key === "MVP") pred = preds[pid + "-" + key];
+      else pred = preds[pid + "-" + key]; // QP_RUN/4TH: full bracket players can also fill these
+    }
+    if (!pred || typeof pred !== "string") return;
+    if (pred.trim().toLowerCase() === actual.trim().toLowerCase()) {
+      total += SCORE_QP[key];
+      if (key === "GOLDEN_BOOT" || key === "MVP") breakdown.awardPoints += SCORE_QP[key];
+      else breakdown.qpPoints += SCORE_QP[key];
+    }
+  });
+
+  return { total, breakdown };
+}
+
+function calcAllScores(players, preds, results) {
+  return players.map(p => {
+    const s = calcPlayerScore(p.id, preds, results, players);
+    return {...p, ...s};
+  }).sort((a, b) => b.total - a.total);
+}
 
 const GT = {
   A:["Mexico","South Africa","South Korea","Czechia"],
@@ -319,14 +403,23 @@ function App() {
   const [pname, setPname] = useState("");
   const [tab, setTab] = useState("setup");
   const [preds, setPreds] = useState({});
+  const [results, setResults] = useState({});
   const [started, setStarted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [live, setLive] = useState(false);
   const [errs, setErrs] = useState({});
   const [viewId, setViewId] = useState(null);
-  const [saveStatus, setSaveStatus] = useState(null); // null | "saving" | "saved" | "error"
+  const [saveStatus, setSaveStatus] = useState(null);
   const [nowTick, setNowTick] = useState(Date.now());
-  const [groupView, setGroupView] = useState("group"); // "group" | "date"
+  const [groupView, setGroupView] = useState("date");
+  const [adminMode, setAdminMode] = useState(false);
+  const [adminPwInput, setAdminPwInput] = useState("");
+  const ADMIN_PASSWORD = "wc2026admin";
+  const [apiKey, setApiKey] = useState("");
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [syncStatus, setSyncStatus] = useState(null); // null | "syncing" | "ok" | "error" | "no_key"
+  const [lastSynced, setLastSynced] = useState(null);
+  const syncTimer = useRef(null);
   const recentEdits = useRef({});
   const saveTimer = useRef(null);
 
@@ -362,15 +455,113 @@ function App() {
             return merged;
           });
         }
+        if (d.results) setResults(d.results);
+        if (d.apiKey) setApiKey(d.apiKey);
         if (d.tournamentStarted) setStarted(true);
       }
-      setNowTick(Date.now()); // refresh clock so kickoff locks engage without a page reload
+      setNowTick(Date.now());
       setLoading(false);
     };
     load();
     const iv = setInterval(load, 8000);
     return () => clearInterval(iv);
   }, []);
+
+  // ---- AUTO-SYNC from wc2026api.com ----
+  // Maps wc2026api match_number (1-72 group, 73-104 KO) to our match IDs
+  // Group matches: match_number 1-72 maps to GM array index (0-based) → GM[n-1].id
+  // KO matches: match_number 73-104 maps to "M73"-"M104"
+  const WC_API = "https://api.wc2026api.com";
+
+  // Normalise team names that may differ between wc2026api and our GT data
+  const TEAM_NAME_MAP = {
+    "Bosnia and Herzegovina":"Bosnia-Herzegovina",
+    "Bosnia & Herzegovina":"Bosnia-Herzegovina",
+    "Türkiye":"Turkiye","Turkey":"Turkiye",
+    "DR Congo":"Congo DR","Congo, DR":"Congo DR","Democratic Republic of Congo":"Congo DR",
+    "Ivory Coast":"Ivory Coast","Côte d'Ivoire":"Ivory Coast",
+    "Czech Republic":"Czechia","Czechia":"Czechia",
+    "United States":"United States","USA":"United States",
+    "Cape Verde Islands":"Cape Verde","Cabo Verde":"Cape Verde",
+    "South Korea":"South Korea","Korea Republic":"South Korea",
+    "Curacao":"Curacao","Curaçao":"Curacao",
+  };
+  const normTeam = (name) => {
+    if (!name) return name;
+    return TEAM_NAME_MAP[name] || name;
+  };
+
+  const syncLiveScores = async (key) => {
+    if (!key) { setSyncStatus("no_key"); return; }
+    setSyncStatus("syncing");
+    try {
+      const res = await fetch(WC_API + "/matches", {
+        headers: { "Authorization": "Bearer " + key }
+      });
+      if (!res.ok) {
+        setSyncStatus("error");
+        return;
+      }
+      const data = await res.json();
+      // wc2026api returns either an array or { matches: [...] } or { data: [...] }
+      const matches = Array.isArray(data) ? data :
+                      (data.matches || data.data || []);
+
+      const updates = {};
+      matches.forEach(m => {
+        const num = m.match_number;
+        const phase = (m.phase || m.status || "").toUpperCase();
+        const isFinished = phase === "FT" || phase === "FT_PEN" ||
+                           phase === "FINISHED" || phase === "COMPLETE" ||
+                           m.status === "finished";
+        if (!isFinished) return;
+        const hs = m.home_score, as_ = m.away_score;
+        if (hs === null || hs === undefined || as_ === null || as_ === undefined) return;
+
+        if (num >= 1 && num <= 72) {
+          // Group match
+          const gm = GM[num - 1];
+          if (gm) {
+            updates[gm.id] = hs + "-" + as_;
+          }
+        } else if (num >= 73 && num <= 104) {
+          // KO match — store winning team name
+          const mid = "M" + num;
+          const homeTeam = normTeam(m.home_team);
+          const awayTeam = normTeam(m.away_team);
+          if (parseInt(hs) > parseInt(as_)) updates[mid] = homeTeam;
+          else if (parseInt(as_) > parseInt(hs)) updates[mid] = awayTeam;
+          // draws in KO go to penalties — use FT_PEN phase and winning team if API provides it
+          else if (m.winner) updates[mid] = normTeam(m.winner);
+        }
+      });
+
+      // Batch-write new or changed results to Firebase
+      const existing = await fbGet("/results") || {};
+      const toWrite = {};
+      Object.entries(updates).forEach(([k, v]) => {
+        if (existing[k] !== v) toWrite[k] = v;
+      });
+      if (Object.keys(toWrite).length > 0) {
+        await Promise.all(
+          Object.entries(toWrite).map(([k, v]) => fbSetResult(k, v))
+        );
+        setResults(prev => ({...prev, ...toWrite}));
+      }
+      setLastSynced(new Date());
+      setSyncStatus("ok");
+    } catch (err) {
+      setSyncStatus("error");
+    }
+  };
+
+  // Auto-sync every 5 minutes when apiKey is set
+  useEffect(() => {
+    if (!apiKey) return;
+    syncLiveScores(apiKey);
+    const iv = setInterval(() => syncLiveScores(apiKey), 5 * 60 * 1000);
+    return () => clearInterval(iv);
+  }, [apiKey]);
 
   const addPlayer = async () => {
     const n = newName.trim();
@@ -552,27 +743,95 @@ function App() {
   }
 
   if (live) {
-    return e("div", {className: "min-h-screen wc-bg p-8"},
-      e("div", {className: "max-w-4xl mx-auto"},
-        e("h1", {className: "text-5xl font-bold text-white text-center mb-8"}, "LIVE LEADERBOARD"),
-        e("div", {className: "bg-white rounded-3xl p-8 shadow-2xl"},
-          e("table", {className: "w-full"},
+    const scored = calcAllScores(players, preds, results);
+    const hasResults = Object.keys(results).length > 0;
+    const medals = ["\uD83E\uDD47","\uD83E\uDD48","\uD83E\uDD49"];
+    const rankBg = ["bg-yellow-50","bg-gray-100","bg-orange-50"];
+
+    return e("div", {className: "min-h-screen wc-bg p-6 md:p-10"},
+      e("div", {className: "max-w-5xl mx-auto"},
+        // Header
+        e("div", {className: "flex items-start justify-between mb-8"},
+          e("button", {onClick: () => setLive(false),
+            className: "px-5 py-2.5 bg-white/15 hover:bg-white/25 text-white text-sm font-bold rounded-xl border border-white/20 transition flex items-center gap-2"
+          }, "\u2190 Back"),
+          e("div", {className: "text-center flex-1"},
+            e("h1", {className: "wc-title text-5xl md:text-7xl text-white mb-2"}, "LEADERBOARD"),
+            e("div", {className: "inline-flex items-center gap-2 bg-emerald-500/20 border border-emerald-400/40 rounded-full px-4 py-1.5"},
+              e("div", {className: "w-2 h-2 rounded-full bg-emerald-400 animate-pulse"}),
+              e("span", {className: "text-emerald-200 text-sm font-bold tracking-widest uppercase"}, "Live · auto-updates every 8s")
+            )
+          ),
+          e("div", {className: "w-24"}) // spacer to keep title centred
+        ),
+
+        // Scoring legend
+        e("div", {className: "bg-white/10 backdrop-blur rounded-2xl p-4 mb-6 flex flex-wrap gap-3 justify-center text-xs font-bold"},
+          e("span", {className: "text-white/70 mr-1 self-center"}, "Scoring:"),
+          [["Exact score","3 pts","bg-emerald-500/70"],["Correct result","1 pt","bg-blue-500/70"],
+           ["KO winner","2 pts","bg-purple-500/70"],["Champion","5 pts","bg-yellow-500/70"],
+           ["Runner-up","3 pts","bg-amber-400/70"],["3rd/4th","2/1 pts","bg-orange-400/70"],
+           ["Boot/MVP","3 pts ea","bg-pink-500/70"]].map(([l,v,bg]) =>
+            e("span", {key:l, className: "flex items-center gap-1.5 px-3 py-1 rounded-full text-white " + bg},
+              e("span", null, l), e("span", {className: "font-bold opacity-90"}, v))
+          )
+        ),
+
+        // Leaderboard table
+        e("div", {className: "bg-white rounded-3xl shadow-2xl overflow-hidden"},
+          e("table", {className: "w-full border-collapse"},
             e("thead", null,
-              e("tr", {className: "border-b-4 border-blue-900"},
-                ["Rank", "Player"].map(h => e("th", {key: h, className: "py-4 px-4 text-blue-900 font-bold text-2xl text-left"}, h))
+              e("tr", {className: "bg-gradient-to-r from-blue-900 to-teal-800"},
+                e("th", {className: "py-4 px-4 text-white font-black text-xl text-left w-16"}, "#"),
+                e("th", {className: "py-4 px-4 text-white font-black text-xl text-left"}, "Player"),
+                e("th", {className: "py-4 px-4 text-amber-300 font-black text-2xl text-right"}, "Pts"),
+                e("th", {className: "py-4 px-4 text-blue-200 font-bold text-sm text-right hidden md:table-cell"}, "Exact"),
+                e("th", {className: "py-4 px-4 text-blue-200 font-bold text-sm text-right hidden md:table-cell"}, "Result"),
+                e("th", {className: "py-4 px-4 text-blue-200 font-bold text-sm text-right hidden md:table-cell"}, "KO"),
+                e("th", {className: "py-4 px-4 text-blue-200 font-bold text-sm text-right hidden md:table-cell"}, "Awards")
               )
             ),
             e("tbody", null,
-              players.map((p, i) =>
-                e("tr", {key: p.id, className: "border-b-2 " + (i === 0 ? "bg-yellow-100" : i === 1 ? "bg-gray-100" : i === 2 ? "bg-orange-100" : "")},
-                  e("td", {className: "px-4 py-6 text-4xl font-bold text-blue-900"}, (i + 1)),
-                  e("td", {className: "px-4 py-6 text-3xl font-bold text-blue-900"}, p.name)
-                )
-              )
+              scored.map((p, i) => {
+                const isTop3 = i < 3;
+                const mode = preds[p.id + "-MODE"] === "quick" ? "QP" : "Full";
+                return e("tr", {key: p.id,
+                  className: "border-b-2 border-gray-100 transition hover:bg-blue-50 " + (rankBg[i] || "")},
+                  e("td", {className: "px-4 py-5 text-3xl font-black text-blue-900 text-center"},
+                    isTop3 ? medals[i] : e("span", {className: "text-2xl text-gray-400"}, i + 1)),
+                  e("td", {className: "px-4 py-5"},
+                    e("div", {className: "flex items-center gap-2"},
+                      e("span", {className: "text-2xl font-bold text-blue-900"}, p.name),
+                      e("span", {className: "text-xs px-2 py-0.5 rounded-full font-bold " +
+                        (mode === "QP" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700")}, mode)
+                    ),
+                    !hasResults && e("div", {className: "text-xs text-gray-400 mt-0.5"}, "Waiting for first results…")
+                  ),
+                  e("td", {className: "px-4 py-5 text-right"},
+                    e("span", {className: "text-3xl font-black text-blue-900"}, hasResults ? p.total : "–")
+                  ),
+                  e("td", {className: "px-4 py-5 text-right text-lg font-bold text-emerald-600 hidden md:table-cell"},
+                    hasResults ? (p.breakdown.groupExact > 0 ? "+" + p.breakdown.groupExact : "–") : "–"),
+                  e("td", {className: "px-4 py-5 text-right text-lg font-bold text-blue-500 hidden md:table-cell"},
+                    hasResults ? (p.breakdown.groupOutcome > 0 ? "+" + p.breakdown.groupOutcome : "–") : "–"),
+                  e("td", {className: "px-4 py-5 text-right text-lg font-bold text-purple-600 hidden md:table-cell"},
+                    hasResults ? (p.breakdown.koCorrect > 0 ? "+" + p.breakdown.koCorrect : "–") : "–"),
+                  e("td", {className: "px-4 py-5 text-right text-lg font-bold text-pink-600 hidden md:table-cell"},
+                    hasResults ? ((p.breakdown.qpPoints + p.breakdown.awardPoints) > 0 ? "+" + (p.breakdown.qpPoints + p.breakdown.awardPoints) : "–") : "–")
+                );
+              })
             )
           )
         ),
-        e("button", {onClick: () => setLive(false), className: "mt-8 mx-auto block px-8 py-4 bg-red-500 text-white text-2xl rounded-xl font-bold"}, "Exit")
+
+        // Matches played counter
+        hasResults && (() => {
+          const played = GM.filter(m => results[m.id]).length;
+          const koPlayed = [...R32,...R16,...QF,...SF,{id:"M103"},{id:"M104"}].filter(m => results[m.id]).length;
+          return e("div", {className: "mt-4 text-center text-white/60 text-sm font-semibold"},
+            played + " group matches + " + koPlayed + " knockout matches with results entered"
+          );
+        })()
       )
     );
   }
@@ -609,32 +868,63 @@ function App() {
     );
   } else if (!pid) {
     // LOGIN VIEW
-    mainView = e("div", {className: "wc-card rounded-2xl p-8 shadow-2xl max-w-md mx-auto"},
-      e("h2", {className: "text-2xl font-bold text-blue-900 mb-6 text-center"}, "Welcome!"),
-      regOpen() ?
-        e("div", {className: "mb-6"},
-          e("p", {className: "text-gray-600 font-semibold mb-3 text-center"}, "New player? Add your name:"),
-          e("div", {className: "flex gap-2"},
-            e("input", {
-              type: "text", value: newName,
-              onChange: ev => setNewName(ev.target.value),
-              onKeyPress: ev => { if (ev.key === "Enter") addPlayer(); },
-              placeholder: "Your name...",
-              className: "flex-1 px-4 py-3 border-2 border-blue-300 rounded-lg focus:outline-none focus:border-blue-600"
-            }),
-            e("button", {onClick: addPlayer, className: "px-5 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700"}, "Join")
-          ),
-          e("p", {className: "text-xs text-gray-400 text-center mt-2"}, "Registration closes June 18")
-        ) :
-        e("p", {className: "text-center text-red-500 font-bold mb-4"}, "Registration closed"),
-      e("p", {className: "text-gray-600 font-semibold mb-3 text-center"}, "Select your name:"),
-      e("div", {className: "space-y-2"},
-        players.map(p =>
+    const sortedPlayers = players.slice().sort((a, b) => a.name.localeCompare(b.name));
+    const filtered = newName.trim()
+      ? sortedPlayers.filter(p => p.name.toLowerCase().includes(newName.trim().toLowerCase()))
+      : sortedPlayers;
+
+    mainView = e("div", {className: "wc-card rounded-2xl p-8 shadow-2xl max-w-lg mx-auto"},
+      e("h2", {className: "text-2xl font-bold text-blue-900 mb-1 text-center"}, "Who are you?"),
+      e("p", {className: "text-gray-500 text-sm text-center mb-6"}, "Select your name to enter your picks"),
+
+      // Search / join input — dual purpose
+      e("div", {className: "relative mb-5"},
+        e("input", {
+          type: "text", value: newName,
+          onChange: ev => setNewName(ev.target.value),
+          onKeyPress: ev => { if (ev.key === "Enter" && regOpen()) addPlayer(); },
+          placeholder: regOpen() ? "Search players or type your name to join…" : "Search players…",
+          className: "w-full pl-10 pr-4 py-3 border-2 border-blue-200 rounded-xl text-sm focus:outline-none focus:border-blue-500 bg-white"
+        }),
+        e("span", {className: "absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-base"}, "\uD83D\uDD0D")
+      ),
+
+      // Player grid — alphabetical, compact pills
+      e("div", {className: "grid grid-cols-2 sm:grid-cols-3 gap-2 mb-5"},
+        filtered.length > 0
+          ? filtered.map(p =>
+              e("button", {
+                key: p.id,
+                onClick: () => { setNewName(""); login(p.id, p.name); },
+                className: "flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 border-blue-100 bg-white hover:border-blue-500 hover:bg-blue-50 hover:shadow-md transition text-left group"
+              },
+                e("span", {className: "w-7 h-7 rounded-full bg-blue-100 group-hover:bg-blue-500 flex items-center justify-center text-xs font-black text-blue-700 group-hover:text-white flex-shrink-0 transition"},
+                  p.name.charAt(0).toUpperCase()),
+                e("span", {className: "text-sm font-semibold text-blue-900 truncate"}, p.name)
+              )
+            )
+          : e("div", {className: "col-span-3 text-center py-4 text-sm text-gray-400 italic"},
+              newName.trim() ? "No player found \u2014 " + (regOpen() ? "press Enter to join as \"" + newName.trim() + "\"" : "registration is closed") : "No players yet"
+            )
+      ),
+
+      // Join prompt (registration open only)
+      regOpen() && newName.trim() && !players.find(p => p.name.toLowerCase() === newName.trim().toLowerCase()) &&
+        e("div", {className: "mb-4"},
           e("button", {
-            key: p.id, onClick: () => login(p.id, p.name),
-            className: "w-full py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition"
-          }, p.name)
-        )
+            onClick: addPlayer,
+            className: "w-full py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-bold text-sm hover:shadow-lg transition flex items-center justify-center gap-2"
+          },
+            e("span", null, "+"),
+            "Join as \"" + newName.trim() + "\""
+          )
+        ),
+
+      e("div", {className: "flex items-center justify-between text-xs text-gray-400 border-t border-gray-100 pt-4"},
+        e("span", null, players.length + " player" + (players.length !== 1 ? "s" : "") + " registered"),
+        regOpen()
+          ? e("span", {className: "text-amber-600 font-semibold"}, "Registration closes June 18")
+          : e("span", {className: "text-red-400 font-semibold"}, "Registration closed")
       )
     );
   } else {
@@ -646,13 +936,35 @@ function App() {
       const matchRow = (m, showGroup) => {
         const val = getPred(m.id);
         const lk = isLockedKey(m.id);
-        return e("div", {key: m.id, className: "p-2 rounded-lg mb-2 " + (errs[m.id] ? "bg-red-50 border border-red-300" : lk ? "bg-gray-100 border border-gray-200" : "bg-blue-50")},
+        const actual = results[m.id];
+        // Compare prediction to actual for color feedback
+        let scoreStatus = null; // "exact" | "outcome" | "wrong" | null
+        if (actual && val) {
+          if (actual === val) scoreStatus = "exact";
+          else if (getOutcome(actual) && getOutcome(actual) === getOutcome(val)) scoreStatus = "outcome";
+          else if (lk) scoreStatus = "wrong";
+        }
+        const statusBg = scoreStatus === "exact" ? "bg-emerald-50 border border-emerald-300" :
+                         scoreStatus === "outcome" ? "bg-blue-50 border border-blue-200" :
+                         scoreStatus === "wrong" ? "bg-red-50 border border-red-200" :
+                         errs[m.id] ? "bg-red-50 border border-red-300" :
+                         lk ? "bg-gray-100 border border-gray-200" : "bg-blue-50";
+        return e("div", {key: m.id, className: "p-2 rounded-lg mb-2 " + statusBg},
           e("div", {className: "flex items-center gap-2"},
             e("div", {className: "flex-1 min-w-0"},
               e("div", {className: "text-sm font-semibold " + (lk ? "text-gray-500" : "text-blue-900")},
                 getFlag(m.t1) + "\u00A0" + m.t1 + (showGroup ? "  (Grp " + m.g + ")" : "") + "  vs  " + getFlag(m.t2) + "\u00A0" + m.t2),
               e("div", {className: "text-[10px] font-semibold " + (lk ? "text-gray-400" : "text-blue-500")},
                 lk ? "\uD83D\uDD12 Locked \u00b7 kicked off " + fmtKO(KICKOFF[m.id]) : "\u23F1 " + fmtKO(KICKOFF[m.id]))
+            ),
+            actual && e("div", {className: "flex items-center gap-1"},
+              e("div", {className: "text-[10px] font-bold text-gray-500 text-right leading-tight"},
+                scoreStatus === "exact" ? "\u2705 exact" :
+                scoreStatus === "outcome" ? "\uD83D\uDFE1 result" :
+                scoreStatus === "wrong" ? "\u274C miss" : ""
+              ),
+              e("div", {className: "w-16 px-2 py-1 border-2 border-emerald-400 rounded font-mono text-center text-sm font-bold bg-emerald-100 text-emerald-800"},
+                actual)
             ),
             e("input", {
               type: "text", value: val,
@@ -665,10 +977,13 @@ function App() {
         );
       };
       const byTime = (a, b) => (KICKOFF[a.id] || 0) - (KICKOFF[b.id] || 0);
-      const viewBtn = (lbl, v) => e("button", {
+      const viewBtn = (lbl, v, icon) => e("button", {
         key: v, onClick: () => setGroupView(v),
-        className: "px-3 py-1.5 rounded-lg text-xs font-bold transition " + (groupView === v ? "bg-blue-700 text-white" : "bg-blue-100 text-blue-800 hover:bg-blue-200")
-      }, lbl);
+        className: "flex-1 flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition " +
+          (groupView === v
+            ? "bg-blue-700 text-white shadow-md"
+            : "bg-blue-100 text-blue-800 hover:bg-blue-200")
+      }, e("span", null, icon), lbl);
 
       let matchesView;
       if (groupView === "date") {
@@ -701,11 +1016,18 @@ function App() {
 
       const awardLock = isLockedKey("GOLDEN_BOOT");
       tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
-        e("div", {className: "flex items-start justify-between gap-3 flex-wrap mb-1"},
-          e("h2", {className: "text-2xl font-bold text-blue-900"}, "Group Predictions"),
-          e("div", {className: "flex gap-1"}, viewBtn("By group", "group"), viewBtn("By date", "date"))
+        e("div", {className: "flex items-start justify-between gap-3 flex-wrap mb-3"},
+          e("h2", {className: "text-2xl font-bold text-blue-900"}, "My Group Picks"),
+          e("button", {
+            onClick: () => setTab("standings"),
+            className: "text-xs font-bold text-blue-600 hover:text-blue-800 underline underline-offset-2 flex items-center gap-1"
+          }, "\uD83D\uDCCA View My Group Overview \u2192")
         ),
-        e("p", {className: "text-gray-500 text-sm mb-6"}, 'Enter scores as "2-1". Kickoff times are shown in your local time - each match locks automatically at kickoff.'),
+        e("div", {className: "flex gap-2 mb-5 max-w-xs"},
+          viewBtn("By Date", "date", "\uD83D\uDCC5"),
+          viewBtn("By Group", "group", "\uD83D\uDDC2\uFE0F")
+        ),
+        e("p", {className: "text-gray-500 text-sm mb-6"}, 'Enter scores as "2-1". Kickoff times are shown in your local time — each match locks automatically at kickoff.'),
         e("div", {className: "bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-xl p-4 mb-6"},
           e("h3", {className: "text-base font-bold text-orange-700 mb-3"}, "Special Predictions" + (awardLock ? " \u00b7 \uD83D\uDD12 locked (knockout stage underway)" : "")),
           e("div", {className: "grid grid-cols-1 md:grid-cols-2 gap-4"},
@@ -796,8 +1118,14 @@ function App() {
       );
     } else if (tab === "standings") {
       tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
-        e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Predicted Standings"),
-        e("p", {className: "text-gray-500 text-sm mb-6"}, "Green = qualified (top 2). Tiebreakers: GD then GF."),
+        e("div", {className: "flex items-start justify-between gap-3 flex-wrap mb-1"},
+          e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "My Group Overview"),
+          e("button", {
+            onClick: () => setTab("results"),
+            className: "text-xs font-bold text-emerald-600 hover:text-emerald-800 underline underline-offset-2 flex items-center gap-1"
+          }, "\uD83D\uDFE2 View Actual Results \u2192")
+        ),
+        e("p", {className: "text-gray-500 text-sm mb-6"}, "Your predicted standings based on your score picks. Green = qualified (top 2). Tiebreakers: GD then GF."),
         e("div", {className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"},
           Object.keys(standings).map(g => {
             const q = qualified[g];
@@ -836,7 +1164,7 @@ function App() {
       );
     } else if (tab === "bracket") {
       tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
-        e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Tournament Bracket"),
+        e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Knockout Stages"),
         e("p", {className: "text-gray-500 text-sm mb-4"}, "Official FIFA format: 12 group winners + 12 runners-up + 8 best third-placed teams. Teams auto-fill from your group predictions. " +
           (bracketLocked ? "\uD83D\uDD12 The bracket is locked - the knockout stage is underway." : "All bracket picks lock when the knockout stage kicks off: " + fmtKO(KNOCKOUT_LOCK) + " (your local time).")),
         (() => {
@@ -1087,6 +1415,340 @@ function App() {
       );
     }
 
+    // ---- RESULTS TAB ----
+    if (tab === "results") {
+      const setResult = async (key, val) => {
+        if (!adminMode) return;
+        const cleaned = val.trim();
+        setResults(prev => ({...prev, [key]: cleaned}));
+        await fbSetResult(key, cleaned);
+      };
+
+      const resultInput = (matchId, placeholder, isScore) => {
+        const actual = results[matchId] || "";
+        const hasResult = !!actual;
+        return e("div", {key: matchId, className: "relative"},
+          adminMode
+            ? e("input", {
+                type: "text",
+                value: actual,
+                onChange: ev => setResult(matchId, ev.target.value),
+                placeholder: placeholder,
+                className: "w-full px-2 py-1.5 border-2 " +
+                  (hasResult ? "border-emerald-400 bg-emerald-50 font-bold text-emerald-800" :
+                  "border-amber-300 bg-amber-50") +
+                  " rounded text-center text-sm font-mono focus:outline-none focus:border-blue-500"
+              })
+            : e("div", {className: "px-2 py-1.5 rounded text-center text-sm font-mono font-bold " +
+                (hasResult ? "bg-emerald-100 text-emerald-800 border border-emerald-300" :
+                "bg-gray-100 text-gray-400 border border-gray-200 italic")},
+                hasResult ? actual : "—"
+              )
+        );
+      };
+
+      // Group matches results section — same standings-table layout as My Group Overview
+      const byTime2 = (a, b) => (KICKOFF[a.id] || 0) - (KICKOFF[b.id] || 0);
+
+      // Compute actual standings from results (mirrors calcStandings but uses results, not preds)
+      const actualSt = {};
+      Object.keys(GT).forEach(g => {
+        actualSt[g] = GT[g].map(t => ({team:t, pts:0, played:0, w:0, d:0, l:0, gf:0, ga:0}));
+      });
+      GM.forEach(m => {
+        const sc = results[m.id];
+        if (!sc || !sc.includes("-")) return;
+        const [gf, ga] = sc.split("-").map(Number);
+        if (isNaN(gf) || isNaN(ga)) return;
+        const t1 = actualSt[m.g].find(t => t.team === m.t1);
+        const t2 = actualSt[m.g].find(t => t.team === m.t2);
+        if (!t1 || !t2) return;
+        t1.gf += gf; t1.ga += ga; t1.played++;
+        t2.gf += ga; t2.ga += gf; t2.played++;
+        if (gf > ga) { t1.pts += 3; t1.w++; t2.l++; }
+        else if (gf < ga) { t2.pts += 3; t2.w++; t1.l++; }
+        else { t1.pts++; t2.pts++; t1.d++; t2.d++; }
+      });
+      Object.keys(actualSt).forEach(g => {
+        actualSt[g].sort((a, b) => {
+          if (b.pts !== a.pts) return b.pts - a.pts;
+          const gdb = b.gf - b.ga, gda = a.gf - a.ga;
+          if (gdb !== gda) return gdb - gda;
+          return b.gf - a.gf;
+        });
+      });
+      const anyActualResults = GM.some(m => results[m.id]);
+
+      const groupResultsSection = e("div", null,
+        e("div", {className: "flex items-center justify-between mb-4 flex-wrap gap-2"},
+          e("h3", {className: "text-lg font-bold text-blue-900 flex items-center gap-2"},
+            e("span", null, "\u26BD"), "Group Stage Results"
+          ),
+          e("button", {
+            onClick: () => setTab("standings"),
+            className: "text-xs font-bold text-blue-600 hover:text-blue-800 underline underline-offset-2"
+          }, "\uD83D\uDCCA Compare with my picks \u2192")
+        ),
+        !anyActualResults && e("div", {className: "bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-700 font-semibold mb-4"},
+          "No group results yet. Scores will appear here as matches are completed."
+        ),
+        e("div", {className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"},
+          Object.keys(GT).map(g => {
+            const rows = actualSt[g];
+            const hasAny = rows.some(t => t.played > 0);
+            return e("div", {key: g},
+              e("div", {className: "flex items-center gap-2 mb-2"},
+                e("h3", {className: "text-base font-bold text-blue-900 bg-blue-100 rounded-lg px-3 py-2 flex-1"}, "Group " + g),
+                hasAny && rows[0] && e("span", {className: "text-xs bg-green-200 text-green-900 px-2 py-1 rounded-full font-bold"}, rows[0].team)
+              ),
+              e("table", {className: "w-full text-xs"},
+                e("thead", null,
+                  e("tr", {className: "text-blue-900 font-bold border-b-2 border-blue-200"},
+                    ["Team","P","W","D","L","GF","GA","GD","Pts"].map(h =>
+                      e("th", {key:h, className:"py-1 " + (h==="Team"?"text-left pl-1":"text-center")}, h)
+                    )
+                  )
+                ),
+                e("tbody", null,
+                  rows.map((t, i) => {
+                    // Show actual score inputs inline per match row only in admin mode — keep table clean otherwise
+                    const rowClass = "border-b border-blue-100 " +
+                      (!hasAny ? "opacity-40 " : "") +
+                      (hasAny && i < 2 ? "bg-green-50" : hasAny ? "bg-red-50" : "");
+                    return e("tr", {key: t.team, className: rowClass},
+                      e("td", {className: "py-1 pl-1 font-semibold text-blue-900"},
+                        (i===0?"1. ":i===1?"2. ":"x ") + getFlag(t.team) + "\u00A0" + t.team),
+                      e("td", {className:"py-1 text-center"}, t.played||"–"),
+                      e("td", {className:"py-1 text-center"}, t.played?t.w:"–"),
+                      e("td", {className:"py-1 text-center"}, t.played?t.d:"–"),
+                      e("td", {className:"py-1 text-center"}, t.played?t.l:"–"),
+                      e("td", {className:"py-1 text-center"}, t.played?t.gf:"–"),
+                      e("td", {className:"py-1 text-center"}, t.played?t.ga:"–"),
+                      e("td", {className:"py-1 text-center font-bold " +
+                        (t.played&&(t.gf-t.ga)>0?"text-green-600":t.played&&(t.gf-t.ga)<0?"text-red-500":"")},
+                        t.played ? t.gf-t.ga : "–"),
+                      e("td", {className:"py-1 text-center font-bold text-blue-900"}, t.played?t.pts:"–")
+                    );
+                  })
+                )
+              ),
+              // Score inputs below the table (admin) or score display (all)
+              adminMode && e("div", {className: "mt-2 space-y-1"},
+                GM.filter(m => m.g === g).slice().sort(byTime2).map(m => {
+                  const kicked = nowTick >= (KICKOFF[m.id] || Infinity);
+                  if (!kicked) return null;
+                  return e("div", {key: m.id, className: "flex items-center gap-2"},
+                    e("div", {className: "flex-1 text-[10px] text-gray-500 font-semibold"},
+                      getFlag(m.t1) + " " + m.t1.split(" ").pop() + " v " + getFlag(m.t2) + " " + m.t2.split(" ").pop()),
+                    e("div", {className: "w-20"}, resultInput(m.id, "2-1", true))
+                  );
+                })
+              ),
+              !adminMode && hasAny && e("div", {className: "mt-2 space-y-0.5"},
+                GM.filter(m => m.g === g).slice().sort(byTime2).map(m => {
+                  const sc = results[m.id];
+                  if (!sc) return null;
+                  return e("div", {key: m.id, className: "flex items-center gap-2 py-0.5"},
+                    e("div", {className: "flex-1 text-[10px] text-gray-500"},
+                      getFlag(m.t1) + " " + m.t1.split(" ").pop() + " v " + getFlag(m.t2) + " " + m.t2.split(" ").pop()),
+                    e("div", {className: "text-[10px] font-bold font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded"}, sc)
+                  );
+                })
+              )
+            );
+          })
+        )
+      );
+
+      // KO results section
+      const koResultsSection = e("div", {className: "mt-6"},
+        e("h3", {className: "text-lg font-bold text-blue-900 mb-4 flex items-center gap-2"},
+          e("span", {className: "text-2xl"}, "\uD83C\uDFC6"),
+          "Knockout Stage Results"
+        ),
+        e("p", {className: "text-xs text-gray-500 mb-3"}, "Enter the name of the winning team for each match."),
+        [
+          {label:"Round of 32", matches: R32},
+          {label:"Round of 16", matches: R16},
+          {label:"Quarter Finals", matches: QF},
+          {label:"Semi Finals", matches: SF},
+          {label:"Finals", matches: [{id:"M103", label:"Bronze"}, {id:"M104", label:"Final"}]}
+        ].map(round =>
+          e("div", {key: round.label, className: "mb-4"},
+            e("div", {className: "text-xs font-black text-blue-700 uppercase tracking-wider mb-2"}, round.label),
+            e("div", {className: "grid grid-cols-2 md:grid-cols-4 gap-2"},
+              round.matches.map(m => {
+                const lbl = m.label || m.id;
+                return e("div", {key: m.id, className: "bg-blue-50 rounded-lg p-2"},
+                  e("div", {className: "text-[10px] font-bold text-gray-500 mb-1 text-center"}, lbl),
+                  resultInput(m.id, "Winner…", false)
+                );
+              })
+            )
+          )
+        )
+      );
+
+      // Awards results
+      const awardsSection = e("div", {className: "mt-6"},
+        e("h3", {className: "text-lg font-bold text-blue-900 mb-4 flex items-center gap-2"},
+          e("span", {className: "text-2xl"}, "\u2B50"),
+          "Podium & Awards Results"
+        ),
+        e("div", {className: "grid grid-cols-1 md:grid-cols-2 gap-4"},
+          [
+            {key:"QP_WIN", label:"\uD83E\uDD47 Champion"},
+            {key:"QP_RUN", label:"\uD83E\uDD48 Runner-up"},
+            {key:"QP_3RD", label:"\uD83E\uDD49 3rd Place"},
+            {key:"QP_4TH", label:"4️⃣ 4th Place"},
+            {key:"GOLDEN_BOOT", label:"\u26BD Golden Boot"},
+            {key:"MVP", label:"\u2B50 Tournament MVP"}
+          ].map(item =>
+            e("div", {key: item.key, className: "flex items-center gap-3 bg-amber-50 rounded-xl p-3"},
+              e("div", {className: "text-sm font-bold text-amber-800 w-36"}, item.label),
+              e("div", {className: "flex-1"}, resultInput(item.key, "Name…", false))
+            )
+          )
+        )
+      );
+
+      // Live mini-leaderboard preview
+      const scored = calcAllScores(players, preds, results);
+      const hasResults = Object.keys(results).length > 0;
+      const livePreview = hasResults && e("div", {className: "mt-6 bg-gradient-to-br from-blue-900 to-teal-800 rounded-2xl p-5"},
+        e("div", {className: "text-white font-black text-base mb-3 tracking-widest uppercase"}, "\uD83C\uDFC6 Current Standings"),
+        e("div", {className: "space-y-2"},
+          scored.slice(0,10).map((p, i) => {
+            const medals = ["\uD83E\uDD47","\uD83E\uDD48","\uD83E\uDD49"];
+            const pct = scored[0].total > 0 ? Math.round(p.total / scored[0].total * 100) : 0;
+            return e("div", {key: p.id, className: "flex items-center gap-3"},
+              e("div", {className: "w-8 text-center text-lg"}, i < 3 ? medals[i] : e("span", {className: "text-white/50 text-sm font-bold"}, i+1)),
+              e("div", {className: "text-white font-bold text-sm flex-1"}, p.name),
+              e("div", {className: "text-amber-300 font-black text-base w-12 text-right"}, p.total),
+              e("div", {className: "w-24 hidden md:block"},
+                e("div", {className: "h-2 bg-white/20 rounded-full overflow-hidden"},
+                  e("div", {className: "h-full bg-amber-400 rounded-full transition-all", style: {width: pct + "%"}})
+                )
+              )
+            );
+          })
+        )
+      );
+
+      tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
+
+        // ── Admin + API Key header ─────────────────────────────────
+        e("div", {className: "flex items-start justify-between gap-4 mb-5 flex-wrap"},
+          e("div", null,
+            e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Actual Results"),
+            e("p", {className: "text-gray-500 text-sm"}, "Live scores auto-sync from wc2026api.com · Leaderboard updates instantly")
+          ),
+          e("div", {className: "flex flex-col items-end gap-2"},
+            e("button", {
+              onClick: () => setTab("standings"),
+              className: "text-xs font-bold text-blue-600 hover:text-blue-800 underline underline-offset-2 flex items-center gap-1"
+            }, "\uD83D\uDCCA Compare with my picks \u2192"),
+            adminMode
+              ? e("div", {className: "flex items-center gap-2 bg-emerald-100 border border-emerald-300 rounded-xl px-4 py-2"},
+                  e("div", {className: "w-2 h-2 rounded-full bg-emerald-500"}),
+                  e("span", {className: "text-emerald-800 text-sm font-bold"}, "Admin mode"),
+                  e("button", {onClick: () => setAdminMode(false), className: "ml-2 text-xs text-red-500 hover:text-red-700 font-bold"}, "Exit")
+                )
+              : e("div", {className: "flex gap-2 items-center"},
+                  e("input", {type:"password", value:adminPwInput, onChange:ev=>setAdminPwInput(ev.target.value),
+                    onKeyPress: ev=>{ if(ev.key==="Enter"&&adminPwInput===ADMIN_PASSWORD){setAdminMode(true);setAdminPwInput("");} },
+                    placeholder:"Admin password",
+                    className:"px-3 py-2 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 w-40"
+                  }),
+                  e("button", {
+                    onClick:()=>{ if(adminPwInput===ADMIN_PASSWORD){setAdminMode(true);setAdminPwInput("");} },
+                    className:"px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700"
+                  }, "Unlock")
+                )
+          )
+        ),
+
+        // ── API Key setup (admin only) ─────────────────────────────
+        adminMode && e("div", {className: "bg-gradient-to-r from-blue-50 to-cyan-50 border-2 border-blue-200 rounded-2xl p-5 mb-5"},
+          e("div", {className: "flex items-center gap-2 mb-3"},
+            e("div", {className: "text-xl"}, "\u26A1"),
+            e("h3", {className: "font-black text-blue-900 text-base"}, "Live Score Auto-Sync"),
+            syncStatus === "syncing" && e("div", {className: "ml-2 w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"}),
+            syncStatus === "ok" && e("span", {className: "ml-2 text-xs font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full"}, "\u2713 Synced"),
+            syncStatus === "error" && e("span", {className: "ml-2 text-xs font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full"}, "\u26A0 Error"),
+            syncStatus === "no_key" && e("span", {className: "ml-2 text-xs font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full"}, "No API key")
+          ),
+          apiKey
+            ? e("div", {className: "space-y-3"},
+                e("div", {className: "flex items-center gap-3 flex-wrap"},
+                  e("div", {className: "text-sm text-blue-800 font-semibold"},
+                    "\u2705 API key set. Auto-syncing every 5 minutes."),
+                  lastSynced && e("span", {className: "text-xs text-gray-500"},
+                    "Last synced: " + lastSynced.toLocaleTimeString()),
+                  e("button", {
+                    onClick: () => syncLiveScores(apiKey),
+                    className: "px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 transition"
+                  }, "\uD83D\uDD04 Sync now"),
+                  e("button", {
+                    onClick: async () => {
+                      setApiKey("");
+                      await fbSet("/apiKey", null);
+                      setSyncStatus(null);
+                    },
+                    className: "px-3 py-2 bg-red-100 text-red-600 rounded-lg text-xs font-bold hover:bg-red-200"
+                  }, "Remove key")
+                )
+              )
+            : e("div", {className: "space-y-3"},
+                e("p", {className: "text-sm text-blue-700"},
+                  "Get a free API key from ",
+                  e("a", {href:"https://www.wc2026api.com", target:"_blank", className:"font-bold underline"}, "wc2026api.com"),
+                  " (free tier = 100 req/day, more than enough). Once set, all completed match scores sync automatically."),
+                e("div", {className: "flex gap-2 flex-wrap"},
+                  e("input", {
+                    type: "text", value: apiKeyInput,
+                    onChange: ev => setApiKeyInput(ev.target.value),
+                    placeholder: "Paste your API key here (wc2026_xxxxx…)",
+                    className: "flex-1 min-w-0 px-3 py-2 border-2 border-blue-300 rounded-lg text-sm font-mono focus:outline-none focus:border-blue-600"
+                  }),
+                  e("button", {
+                    onClick: async () => {
+                      const k = apiKeyInput.trim();
+                      if (!k) return;
+                      setApiKey(k);
+                      setApiKeyInput("");
+                      await fbSet("/apiKey", k);
+                      syncLiveScores(k);
+                    },
+                    className: "px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 transition whitespace-nowrap"
+                  }, "Save & Sync")
+                )
+              )
+        ),
+
+        // ── Sync status banner for non-admins ─────────────────────
+        !adminMode && e("div", {className: "flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl p-3 mb-4"},
+          apiKey
+            ? e("div", {className: "flex items-center gap-2 text-sm text-blue-700 font-semibold"},
+                e("div", {className: "w-2 h-2 rounded-full bg-emerald-400 animate-pulse"}),
+                "Live scores syncing automatically · ",
+                lastSynced
+                  ? "Last update: " + lastSynced.toLocaleTimeString()
+                  : "Waiting for next sync…"
+              )
+            : e("div", {className: "text-sm text-blue-700 font-semibold"},
+                "\uD83D\uDD12 Read-only · Admin has not configured auto-sync yet. Results will appear here once entered.")
+        ),
+
+        livePreview,
+        e("div", {className: "mt-6 space-y-0"},
+          groupResultsSection,
+          koResultsSection,
+          awardsSection
+        )
+      );
+    }
+
     // --- If viewing a Quick Picks player, show their podium summary on any non-quick tab ---
     const activeMode = preds[activeId + "-MODE"];
     if (isRO && activeMode === "quick" && tab !== "quick") {
@@ -1130,8 +1792,8 @@ function App() {
           e("div", {className: "h-full rounded " + (done === total ? "bg-emerald-400" : "bg-amber-400"), style: {width: (total ? Math.round(done / total * 100) : 0) + "%"}}))
       );
       const chips = myMode === "quick"
-        ? [chip("Quick Picks", quickDone, 6, "quick"), chip("Group Scores", groupDone, 72, "group"), chip("Bracket", bracketDone, 32, "bracket")]
-        : [chip("Group Scores", groupDone, 72, "group"), chip("Bracket", bracketDone, 32, "bracket"), chip("Quick Picks", quickDone, 6, "quick")];
+        ? [chip("Quick Picks", quickDone, 6, "quick"), chip("My Group Picks", groupDone, 72, "group"), chip("Knockout Stages", bracketDone, 32, "bracket")]
+        : [chip("My Group Picks", groupDone, 72, "group"), chip("Knockout Stages", bracketDone, 32, "bracket"), chip("Quick Picks", quickDone, 6, "quick")];
       progressStrip = e("div", {className: "mb-4"},
         e("div", {className: "flex gap-2 flex-wrap"}, chips),
         e("p", {className: "text-center text-emerald-200/90 text-[11px] font-semibold mt-2"},
@@ -1157,10 +1819,11 @@ function App() {
     mainView = e("div", null,
       e("div", {className: "flex gap-2 mb-4 justify-center flex-wrap"},
         Tab("Quick Picks", "quick"),
-        Tab("Groups", "group"),
-        Tab("Standings", "standings"),
-        Tab("Bracket", "bracket"),
-        e("button", {key: "live", onClick: () => setLive(true), className: "px-4 py-2 rounded-lg font-semibold text-sm bg-purple-500/80 text-white hover:bg-purple-600"}, "Live"),
+        Tab("My Group Picks", "group"),
+        Tab("My Group Overview", "standings"),
+        Tab("Knockout Stages", "bracket"),
+        Tab("Actual Results", "results"),
+        e("button", {key: "live", onClick: () => setLive(true), className: "px-4 py-2 rounded-lg font-semibold text-sm bg-purple-500/80 text-white hover:bg-purple-600"}, "\uD83C\uDFC6 Leaderboard"),
         e("button", {key: "out", onClick: logout, className: "px-4 py-2 rounded-lg font-semibold text-sm bg-red-500/80 text-white hover:bg-red-600"}, "Logout (" + pname + ")")
       ),
       progressStrip,

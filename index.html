@@ -86,6 +86,34 @@ const GT = {
 
 const ALL_TEAMS = Object.values(GT).reduce((a, b) => a.concat(b), []).sort();
 
+// ISO 3166-1 alpha-2 → emoji flag via Unicode Regional Indicator Symbols
+const FLAG = (() => {
+  const m = {
+    "Mexico":"MX","South Africa":"ZA","South Korea":"KR","Czechia":"CZ",
+    "Canada":"CA","Bosnia-Herzegovina":"BA","Qatar":"QA","Switzerland":"CH",
+    "Brazil":"BR","Morocco":"MA","Haiti":"HT","Scotland":"GB-SCT",
+    "United States":"US","Paraguay":"PY","Australia":"AU","Turkiye":"TR",
+    "Germany":"DE","Curacao":"CW","Ivory Coast":"CI","Ecuador":"EC",
+    "Netherlands":"NL","Japan":"JP","Sweden":"SE","Tunisia":"TN",
+    "Belgium":"BE","Egypt":"EG","Iran":"IR","New Zealand":"NZ",
+    "Spain":"ES","Cape Verde":"CV","Saudi Arabia":"SA","Uruguay":"UY",
+    "France":"FR","Senegal":"SN","Iraq":"IQ","Norway":"NO",
+    "Argentina":"AR","Algeria":"DZ","Austria":"AT","Jordan":"JO",
+    "Colombia":"CO","Uzbekistan":"UZ","Portugal":"PT","Congo DR":"CD",
+    "England":"GB-ENG","Croatia":"HR","Ghana":"GH","Panama":"PA"
+  };
+  // Convert ISO code to emoji (standard or subdivision for Scotland/England)
+  const toEmoji = (code) => {
+    if (code === "GB-SCT") return "\uD83C\uDFF4\uDB40\uDC67\uDB40\uDC62\uDB40\uDC73\uDB40\uDC63\uDB40\uDC74\uDB40\uDC7F";
+    if (code === "GB-ENG") return "\uD83C\uDFF4\uDB40\uDC67\uDB40\uDC62\uDB40\uDC65\uDB40\uDC6E\uDB40\uDC67\uDB40\uDC7F";
+    return code.split("").map(c => String.fromCodePoint(0x1F1E6 - 65 + c.charCodeAt(0))).join("");
+  };
+  const result = {};
+  Object.entries(m).forEach(([name, code]) => { result[name] = toEmoji(code); });
+  return result;
+})();
+const getFlag = (team) => FLAG[team] || "";
+
 const GM = [
   {id:"A1",t1:"Mexico",t2:"South Africa",g:"A"},{id:"A2",t1:"South Korea",t2:"Czechia",g:"A"},
   {id:"A3",t1:"Mexico",t2:"Czechia",g:"A"},{id:"A4",t1:"South Korea",t2:"South Africa",g:"A"},
@@ -124,6 +152,35 @@ const GM = [
   {id:"L3",t1:"England",t2:"Panama",g:"L"},{id:"L4",t1:"Croatia",t2:"Ghana",g:"L"},
   {id:"L5",t1:"England",t2:"Ghana",g:"L"},{id:"L6",t1:"Panama",t2:"Croatia",g:"L"}
 ];
+
+// ---- OFFICIAL KICKOFF TIMES (stored in UTC, displayed in each viewer's local time) ----
+// Compiled June 2026 from the official FIFA schedule (via ESPN / CBS / Sky Sports post-playoff listings).
+// Where sources differed by an hour (a few Mexico-venue games), the EARLIER time is used so a lock is never late.
+const KOT = (d, h, mi) => Date.UTC(2026, 5, d, h, mi || 0); // month 5 = June
+const KICKOFF = {
+  A1:KOT(11,19), A2:KOT(12,2),  B1:KOT(12,19), D1:KOT(13,1),
+  B2:KOT(13,19), C1:KOT(13,22), C2:KOT(14,1),  D2:KOT(14,4),
+  E1:KOT(14,17), F1:KOT(14,20), E2:KOT(14,23), F2:KOT(15,2),
+  H1:KOT(15,16), G1:KOT(15,19), H2:KOT(15,22), G2:KOT(16,1),
+  I1:KOT(16,19), I2:KOT(16,22), J1:KOT(17,1),  J2:KOT(17,4),
+  K2:KOT(17,17), L1:KOT(17,20), L2:KOT(17,23), K1:KOT(18,2),
+  A6:KOT(18,16), B4:KOT(18,19), B3:KOT(18,22), A5:KOT(19,1),
+  D3:KOT(19,19), C6:KOT(19,22), C5:KOT(20,0,30), D4:KOT(20,3),
+  F5:KOT(20,17), E5:KOT(20,20), E6:KOT(21,0),  F6:KOT(21,2),
+  H3:KOT(21,16), G5:KOT(21,19), H4:KOT(21,22), G6:KOT(22,1),
+  J5:KOT(22,17), I5:KOT(22,21), I6:KOT(23,0),  J6:KOT(23,3),
+  K4:KOT(23,17), L5:KOT(23,20), L6:KOT(23,23), K3:KOT(24,2),
+  B5:KOT(24,19), B6:KOT(24,19), C3:KOT(24,22), C4:KOT(24,22),
+  A3:KOT(25,1),  A4:KOT(25,1),  E3:KOT(25,20), E4:KOT(25,20),
+  F3:KOT(25,23), F4:KOT(25,23), D5:KOT(26,2),  D6:KOT(26,2),
+  I3:KOT(26,19), I4:KOT(26,19), G3:KOT(27,0),  G4:KOT(27,0),
+  H5:KOT(27,3),  H6:KOT(27,3),  L3:KOT(27,21), L4:KOT(27,21),
+  K5:KOT(27,23,30), K6:KOT(27,23,30), J3:KOT(28,2), J4:KOT(28,2)
+};
+// Bracket picks, Quick Picks and award picks all lock when the knockout stage kicks off (Round of 32, Jun 28).
+// Adjust this single constant if FIFA's first R32 kickoff differs.
+const KNOCKOUT_LOCK = KOT(28, 16); // Jun 28, 16:00 UTC (= noon ET)
+const QP_KEYS = ["QP_WIN", "QP_RUN", "QP_3RD", "QP_4TH", "GOLDEN_BOOT", "MVP"];
 
 // Official FIFA 2026 bracket (Appendix A). T1-T8 = third-place slots with allowed groups.
 const THIRD_SLOTS = [
@@ -259,7 +316,20 @@ function App() {
   const [live, setLive] = useState(false);
   const [errs, setErrs] = useState({});
   const [viewId, setViewId] = useState(null);
+  const [saveStatus, setSaveStatus] = useState(null); // null | "saving" | "saved" | "error"
+  const [nowTick, setNowTick] = useState(Date.now());
+  const [groupView, setGroupView] = useState("group"); // "group" | "date"
   const recentEdits = useRef({});
+  const saveTimer = useRef(null);
+
+  const persist = (key, val) => {
+    setSaveStatus("saving");
+    fbSetKey(key, val).then(ok => {
+      setSaveStatus(ok ? "saved" : "error");
+      clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => setSaveStatus(null), 2500);
+    });
+  };
 
   const regOpen = () => new Date() < new Date(2026, 5, 18);
   const activeId = viewId || pid;
@@ -286,6 +356,7 @@ function App() {
         }
         if (d.tournamentStarted) setStarted(true);
       }
+      setNowTick(Date.now()); // refresh clock so kickoff locks engage without a page reload
       setLoading(false);
     };
     load();
@@ -323,8 +394,18 @@ function App() {
   const login = (id, name) => { setPid(id); setPname(name); setTab("group"); };
   const logout = () => { setPid(null); setPname(""); setViewId(null); setTab("login"); };
 
+  // ---- Kickoff locking ----
+  const isLockedKey = (mid) => {
+    if (KICKOFF[mid]) return nowTick >= KICKOFF[mid];               // group match: locks at its own kickoff
+    if (mid === "MODE") return false;                                // play mode is never locked
+    if (QP_KEYS.indexOf(mid) !== -1 || /^M\d+$/.test(mid)) return nowTick >= KNOCKOUT_LOCK; // bracket + quick picks + awards
+    return false;
+  };
+  const bracketLocked = nowTick >= KNOCKOUT_LOCK;
+  const fmtKO = (ms) => new Date(ms).toLocaleString(undefined, {weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit"});
+
   const setPred = (mid, val) => {
-    if (isRO || !pid) return;
+    if (isRO || !pid || isLockedKey(mid)) return;
     const key = pid + "-" + mid;
     recentEdits.current[key] = Date.now();
     const ne = {...errs};
@@ -337,15 +418,24 @@ function App() {
     delete ne[mid];
     setErrs(ne);
     setPreds(prev => ({...prev, [key]: val}));
-    fbSetKey(key, val);
+    persist(key, val);
   };
 
   const setKO = (mid, val) => {
-    if (isRO || !pid) return;
+    if (isRO || !pid || isLockedKey(mid)) return;
     const key = pid + "-" + mid;
     recentEdits.current[key] = Date.now();
     setPreds(prev => ({...prev, [key]: val}));
-    fbSetKey(key, val);
+    persist(key, val);
+  };
+
+  // Switch to viewing another player's picks; jump to the tab that matches their play mode
+  const switchView = (id) => {
+    if (!id || id === pid) { setViewId(null); return; }
+    setViewId(id);
+    const m = preds[id + "-MODE"];
+    if (m === "quick") setTab("quick");
+    else if (tab === "quick") setTab("bracket");
   };
 
   const getPred = (mid) => preds[activeId + "-" + mid] || "";
@@ -413,11 +503,13 @@ function App() {
     const opts = [props.t1, props.t2].filter(Boolean);
     let action;
     const validPick = opts.indexOf(pr) !== -1 ? pr : "";
-    if (opts.length === 2 && !isRO) {
+    if (opts.length === 2 && !isRO && !bracketLocked) {
       action = e("select", {value: validPick, onChange: ev => setKO(props.mid, ev.target.value), className: "bsel"},
         e("option", {value: ""}, props.isF ? "Pick champion" : "Pick winner"),
         opts.map(t => e("option", {key: t, value: t}, t))
       );
+    } else if (opts.length === 2 && !isRO && bracketLocked) {
+      action = e("div", {className: "bdisabled"}, pr ? "\uD83D\uDD12 Locked: " + pr : "\uD83D\uDD12 Locked - no pick");
     } else if (opts.length === 2 && isRO) {
       action = e("div", {className: "bdisabled"}, pr ? "Picked: " + pr : "No pick yet");
     } else {
@@ -430,9 +522,11 @@ function App() {
       action = e("div", {className: "bdisabled"}, msg);
     }
     return e("div", {className: "bmatch", key: props.mid},
-      e("div", {className: "bteam" + (validPick === props.t1 && props.t1 ? " won" : !props.t1 ? " tbd" : "")}, props.t1 || "TBD"),
+      e("div", {className: "bteam" + (validPick === props.t1 && props.t1 ? " won" : !props.t1 ? " tbd" : "")},
+        props.t1 ? e("span", null, getFlag(props.t1) + "\u00A0" + props.t1) : "TBD"),
       e("div", {className: "bvs"}, props.label + " - " + props.date),
-      e("div", {className: "bteam" + (validPick === props.t2 && props.t2 ? " won" : !props.t2 ? " tbd" : "")}, props.t2 || "TBD"),
+      e("div", {className: "bteam" + (validPick === props.t2 && props.t2 ? " won" : !props.t2 ? " tbd" : "")},
+        props.t2 ? e("span", null, getFlag(props.t2) + "\u00A0" + props.t2) : "TBD"),
       action
     );
   };
@@ -540,18 +634,79 @@ function App() {
     let tabContent = null;
 
     if (tab === "group") {
+      // One reusable match row: teams + kickoff (viewer's local time) + score input, locked at kickoff
+      const matchRow = (m, showGroup) => {
+        const val = getPred(m.id);
+        const lk = isLockedKey(m.id);
+        return e("div", {key: m.id, className: "p-2 rounded-lg mb-2 " + (errs[m.id] ? "bg-red-50 border border-red-300" : lk ? "bg-gray-100 border border-gray-200" : "bg-blue-50")},
+          e("div", {className: "flex items-center gap-2"},
+            e("div", {className: "flex-1 min-w-0"},
+              e("div", {className: "text-sm font-semibold " + (lk ? "text-gray-500" : "text-blue-900")},
+                getFlag(m.t1) + "\u00A0" + m.t1 + (showGroup ? "  (Grp " + m.g + ")" : "") + "  vs  " + getFlag(m.t2) + "\u00A0" + m.t2),
+              e("div", {className: "text-[10px] font-semibold " + (lk ? "text-gray-400" : "text-blue-500")},
+                lk ? "\uD83D\uDD12 Locked \u00b7 kicked off " + fmtKO(KICKOFF[m.id]) : "\u23F1 " + fmtKO(KICKOFF[m.id]))
+            ),
+            e("input", {
+              type: "text", value: val,
+              onChange: ev => setPred(m.id, ev.target.value),
+              readOnly: isRO || lk, disabled: lk && !isRO, placeholder: lk ? "\u2014" : "2-1",
+              className: "w-16 px-2 py-1 border-2 " + (errs[m.id] ? "border-red-400" : (isRO || lk) ? "border-gray-200 bg-gray-50 text-gray-500" : "border-blue-300") + " rounded font-mono text-center text-sm focus:outline-none focus:border-blue-600"
+            })
+          ),
+          errs[m.id] && e("p", {className: "text-red-500 text-xs mt-1"}, "Format: 2-1")
+        );
+      };
+      const byTime = (a, b) => (KICKOFF[a.id] || 0) - (KICKOFF[b.id] || 0);
+      const viewBtn = (lbl, v) => e("button", {
+        key: v, onClick: () => setGroupView(v),
+        className: "px-3 py-1.5 rounded-lg text-xs font-bold transition " + (groupView === v ? "bg-blue-700 text-white" : "bg-blue-100 text-blue-800 hover:bg-blue-200")
+      }, lbl);
+
+      let matchesView;
+      if (groupView === "date") {
+        // Chronological view: all 72 matches grouped by calendar day (viewer's local time)
+        const sorted = GM.slice().sort(byTime);
+        const byDay = {}; const dayOrder = [];
+        sorted.forEach(m => {
+          const lbl = new Date(KICKOFF[m.id]).toLocaleDateString(undefined, {weekday: "long", day: "numeric", month: "long"});
+          if (!byDay[lbl]) { byDay[lbl] = []; dayOrder.push(lbl); }
+          byDay[lbl].push(m);
+        });
+        matchesView = e("div", {className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"},
+          dayOrder.map(d =>
+            e("div", {key: d},
+              e("h3", {className: "text-base font-bold text-blue-900 mb-3 bg-blue-100 rounded-lg px-3 py-2"}, d),
+              byDay[d].map(m => matchRow(m, true))
+            )
+          )
+        );
+      } else {
+        matchesView = e("div", {className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"},
+          Object.keys(GT).map(g =>
+            e("div", {key: g},
+              e("h3", {className: "text-base font-bold text-blue-900 mb-3 bg-blue-100 rounded-lg px-3 py-2"}, "Group " + g),
+              GM.filter(m => m.g === g).slice().sort(byTime).map(m => matchRow(m, false))
+            )
+          )
+        );
+      }
+
+      const awardLock = isLockedKey("GOLDEN_BOOT");
       tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
-        e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Group Predictions"),
-        e("p", {className: "text-gray-500 text-sm mb-6"}, 'Enter scores as "2-1". Your bracket auto-populates from these.'),
+        e("div", {className: "flex items-start justify-between gap-3 flex-wrap mb-1"},
+          e("h2", {className: "text-2xl font-bold text-blue-900"}, "Group Predictions"),
+          e("div", {className: "flex gap-1"}, viewBtn("By group", "group"), viewBtn("By date", "date"))
+        ),
+        e("p", {className: "text-gray-500 text-sm mb-6"}, 'Enter scores as "2-1". Kickoff times are shown in your local time - each match locks automatically at kickoff.'),
         e("div", {className: "bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-xl p-4 mb-6"},
-          e("h3", {className: "text-base font-bold text-orange-700 mb-3"}, "Special Predictions"),
+          e("h3", {className: "text-base font-bold text-orange-700 mb-3"}, "Special Predictions" + (awardLock ? " \u00b7 \uD83D\uDD12 locked (knockout stage underway)" : "")),
           e("div", {className: "grid grid-cols-1 md:grid-cols-2 gap-4"},
             e("div", null,
               e("label", {className: "block text-sm font-bold text-orange-700 mb-1"}, "Golden Boot (Top Scorer)"),
               e("input", {
                 type: "text", value: getPred("GOLDEN_BOOT"),
                 onChange: ev => setPred("GOLDEN_BOOT", ev.target.value),
-                readOnly: isRO, placeholder: "e.g. Mbappe",
+                readOnly: isRO || awardLock, placeholder: "e.g. Mbappe",
                 className: "w-full px-3 py-2 border-2 border-orange-300 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-white"
               })
             ),
@@ -560,34 +715,13 @@ function App() {
               e("input", {
                 type: "text", value: getPred("MVP"),
                 onChange: ev => setPred("MVP", ev.target.value),
-                readOnly: isRO, placeholder: "e.g. Vinicius Jr",
+                readOnly: isRO || awardLock, placeholder: "e.g. Vinicius Jr",
                 className: "w-full px-3 py-2 border-2 border-orange-300 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-white"
               })
             )
           )
         ),
-        e("div", {className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"},
-          Object.keys(GT).map(g =>
-            e("div", {key: g},
-              e("h3", {className: "text-base font-bold text-blue-900 mb-3 bg-blue-100 rounded-lg px-3 py-2"}, "Group " + g),
-              GM.filter(m => m.g === g).map(m => {
-                const val = getPred(m.id);
-                return e("div", {key: m.id, className: "p-2 rounded-lg mb-2 " + (errs[m.id] ? "bg-red-50 border border-red-300" : "bg-blue-50")},
-                  e("div", {className: "flex items-center gap-2"},
-                    e("div", {className: "flex-1 text-sm font-semibold text-blue-900"}, m.t1 + " vs " + m.t2),
-                    e("input", {
-                      type: "text", value: val,
-                      onChange: ev => setPred(m.id, ev.target.value),
-                      readOnly: isRO, placeholder: "2-1",
-                      className: "w-16 px-2 py-1 border-2 " + (errs[m.id] ? "border-red-400" : isRO ? "border-gray-200 bg-gray-50" : "border-blue-300") + " rounded font-mono text-center text-sm focus:outline-none focus:border-blue-600"
-                    })
-                  ),
-                  errs[m.id] && e("p", {className: "text-red-500 text-xs mt-1"}, "Format: 2-1")
-                );
-              })
-            )
-          )
-        )
+        matchesView
       );
     } else if (tab === "quick") {
       const teamSel = (lbl, key, accent) => e("div", {key: key},
@@ -595,7 +729,7 @@ function App() {
         e("select", {
           value: getPred(key),
           onChange: ev => setKO(key, ev.target.value),
-          disabled: isRO,
+          disabled: isRO || bracketLocked,
           className: "w-full px-3 py-2 border-2 border-blue-300 rounded-lg text-sm bg-white focus:outline-none focus:border-blue-600"
         },
           e("option", {value: ""}, "Select team..."),
@@ -604,7 +738,9 @@ function App() {
       );
       tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
         e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Quick Picks"),
-        e("p", {className: "text-gray-500 text-sm mb-6"}, "The casual route: call the podium and the individual awards. No bracket required."),
+        e("p", {className: "text-gray-500 text-sm mb-6"}, "The casual route: call the podium and the individual awards. No bracket required. Quick Picks lock for everyone when the knockout stage kicks off (" + fmtKO(KNOCKOUT_LOCK) + " your time)."),
+        bracketLocked && e("div", {className: "bg-gray-100 border border-gray-300 rounded-xl p-3 mb-4 text-sm font-semibold text-gray-600"},
+          "\uD83D\uDD12 Quick Picks are locked - the knockout stage is underway."),
         e("div", {className: "max-w-xl"},
           e("div", {className: "grid grid-cols-1 md:grid-cols-2 gap-4 mb-6"},
             teamSel("CHAMPION", "QP_WIN", "text-amber-600"),
@@ -620,7 +756,7 @@ function App() {
                 e("input", {
                   type: "text", value: getPred("GOLDEN_BOOT"),
                   onChange: ev => setPred("GOLDEN_BOOT", ev.target.value),
-                  readOnly: isRO, placeholder: "e.g. Mbappe",
+                  readOnly: isRO || bracketLocked, placeholder: "e.g. Mbappe",
                   className: "w-full px-3 py-2 border-2 border-orange-300 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-white"
                 })
               ),
@@ -629,7 +765,7 @@ function App() {
                 e("input", {
                   type: "text", value: getPred("MVP"),
                   onChange: ev => setPred("MVP", ev.target.value),
-                  readOnly: isRO, placeholder: "e.g. Vinicius Jr",
+                  readOnly: isRO || bracketLocked, placeholder: "e.g. Vinicius Jr",
                   className: "w-full px-3 py-2 border-2 border-orange-300 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-white"
                 })
               )
@@ -660,7 +796,7 @@ function App() {
                 e("tbody", null,
                   (standings[g] || []).map((t, i) =>
                     e("tr", {key: t.team, className: "border-b border-blue-100 " + (i < 2 ? "bg-green-50" : "bg-red-50")},
-                      e("td", {className: "py-1 pl-1 font-semibold text-blue-900"}, (i === 0 ? "1. " : i === 1 ? "2. " : "x ") + t.team),
+                      e("td", {className: "py-1 pl-1 font-semibold text-blue-900"}, (i === 0 ? "1. " : i === 1 ? "2. " : "x ") + getFlag(t.team) + "\u00A0" + t.team),
                       e("td", {className: "py-1 text-center"}, t.played),
                       e("td", {className: "py-1 text-center"}, t.w),
                       e("td", {className: "py-1 text-center"}, t.d),
@@ -680,7 +816,8 @@ function App() {
     } else if (tab === "bracket") {
       tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
         e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Tournament Bracket"),
-        e("p", {className: "text-gray-500 text-sm mb-4"}, "Official FIFA format: 12 group winners + 12 runners-up + 8 best third-placed teams. Teams auto-fill from your group predictions."),
+        e("p", {className: "text-gray-500 text-sm mb-4"}, "Official FIFA format: 12 group winners + 12 runners-up + 8 best third-placed teams. Teams auto-fill from your group predictions. " +
+          (bracketLocked ? "\uD83D\uDD12 The bracket is locked - the knockout stage is underway." : "All bracket picks lock when the knockout stage kicks off: " + fmtKO(KNOCKOUT_LOCK) + " (your local time).")),
         (() => {
           // Mirrored bracket: Pathway 1 (left) and Pathway 2 (right) meet at the Final
           const P1_R32 = ["M74","M77","M73","M75","M83","M84","M81","M82"];
@@ -706,18 +843,28 @@ function App() {
                 const champ = gKO("M104");
                 const runner = (champ && finalT1 && finalT2) ? (champ === finalT1 ? finalT2 : finalT1) : null;
                 const third = gKO("M103");
-                const row = (lbl, val, hl) => e("div", {key: lbl, style: {display: "flex", justifyContent: "space-between", padding: "4px 6px", borderRadius: "5px", marginBottom: "2px", background: hl || "transparent"}},
-                  e("span", {style: {fontWeight: 700, color: "#92400e", fontSize: "11px"}}, lbl),
-                  e("span", {style: {fontWeight: 700, color: val ? "#1e3a5f" : "#b8b8b8", fontSize: "11px", fontStyle: val ? "normal" : "italic"}}, val || "TBD")
-                );
-                const podium = e("div", {key: "podium", style: {marginTop: "12px", border: "2px solid #f59e0b", borderRadius: "8px", background: "#fffbeb", padding: "8px"}},
-                  e("div", {style: {fontWeight: 800, color: "#92400e", textAlign: "center", marginBottom: "6px", fontSize: "12px"}}, "PODIUM"),
-                  row("1st CHAMPION", champ, "#fde68a"),
-                  row("2nd Runner-up", runner, "#e5e7eb"),
-                  row("3rd Place", third, "#fed7aa"),
+                const podiumSlot = (rank, label, team, bg, flagSz, nameSz, medal) =>
+                  e("div", {key: rank, style: {display:"flex", alignItems:"center", gap:"8px", padding:"6px 8px", borderRadius:"8px", marginBottom:"4px", background: bg || "transparent"}},
+                    e("span", {style: {fontSize: flagSz, lineHeight:1, flexShrink:0}}, team ? getFlag(team) : "\u2753"),
+                    e("div", {style: {flex:1, minWidth:0}},
+                      e("div", {style: {fontSize:"10px", fontWeight:800, color:"#92400e", letterSpacing:"0.05em"}}, medal + " " + label),
+                      e("div", {style: {fontSize: nameSz, fontWeight:700, color: team ? "#1e3a5f" : "#b8b8b8", fontStyle: team ? "normal" : "italic", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}, team || "TBD")
+                    )
+                  );
+                const podium = e("div", {key: "podium", style: {marginTop: "12px", border: "2px solid #f59e0b", borderRadius: "10px", background: "#fffbeb", padding: "10px"}},
+                  e("div", {style: {fontWeight: 800, color: "#92400e", textAlign: "center", marginBottom: "8px", fontSize: "11px", letterSpacing:"0.15em"}},"🏆 PODIUM"),
+                  podiumSlot(1, "CHAMPION",  champ,  "#fde68a", "2.4em", "14px", "🥇"),
+                  podiumSlot(2, "Runner-up", runner, "#e5e7eb", "1.8em", "12px", "🥈"),
+                  podiumSlot(3, "3rd Place", third,  "#fed7aa", "1.4em", "11px", "🥉"),
                   e("div", {style: {borderTop: "1px dashed #f59e0b", margin: "6px 0"}}),
-                  row("Golden Boot", getPred("GOLDEN_BOOT")),
-                  row("MVP", getPred("MVP"))
+                  e("div", {key:"gb", style:{display:"flex",justifyContent:"space-between",padding:"3px 6px",borderRadius:"5px",marginBottom:"2px"}},
+                    e("span", {style:{fontWeight:700,color:"#92400e",fontSize:"10px"}}, "\u26BD Golden Boot"),
+                    e("span", {style:{fontWeight:700,color: getPred("GOLDEN_BOOT") ? "#1e3a5f" : "#b8b8b8",fontSize:"10px",fontStyle: getPred("GOLDEN_BOOT") ? "normal":"italic"}}, getPred("GOLDEN_BOOT") || "TBD")
+                  ),
+                  e("div", {key:"mvp", style:{display:"flex",justifyContent:"space-between",padding:"3px 6px",borderRadius:"5px"}},
+                    e("span", {style:{fontWeight:700,color:"#92400e",fontSize:"10px"}}, "\u2B50 MVP"),
+                    e("span", {style:{fontWeight:700,color: getPred("MVP") ? "#1e3a5f" : "#b8b8b8",fontSize:"10px",fontStyle: getPred("MVP") ? "normal":"italic"}}, getPred("MVP") || "TBD")
+                  )
                 );
                 const bronze = e("div", {key: "bronzewrap", style: {marginTop: "12px"}},
                   e("div", {style: {textAlign: "center", fontWeight: 800, fontSize: "11px", color: "#92400e", background: "#fed7aa", borderRadius: "6px", padding: "4px", marginBottom: "6px"}}, "BRONZE FINAL - Jul 18"),
@@ -739,8 +886,75 @@ function App() {
       );
     }
 
+    // --- If viewing a Quick Picks player, show their podium summary on any non-quick tab ---
+    const activeMode = preds[activeId + "-MODE"];
+    if (isRO && activeMode === "quick" && tab !== "quick") {
+      const viewedName = (players.find(p => p.id === viewId) || {}).name || "This player";
+      const qpRow = (lbl, val, bg, flagSz, medal) => e("div", {key: lbl, className: "flex items-center gap-3 px-4 py-3 rounded-xl mb-2", style: {background: bg || "#f1f5f9"}},
+        e("span", {style: {fontSize: flagSz || "1.2em", lineHeight:1, flexShrink:0}}, val ? getFlag(val) : (medal || "\u2753")),
+        e("span", {className: "text-sm font-bold text-blue-900 flex-1"}, lbl),
+        e("span", {className: "text-sm font-bold " + (val ? "text-blue-900" : "text-gray-400 italic")}, val || "No pick yet")
+      );
+      tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl max-w-xl mx-auto"},
+        e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, viewedName + "'s Picks"),
+        e("p", {className: "text-gray-500 text-sm mb-6"}, viewedName + " is playing Quick Picks mode - no group scores or bracket, just the podium calls below."),
+        qpRow("🥇 CHAMPION",   getPred("QP_WIN"), "#fde68a", "2.2em"),
+        qpRow("🥈 Runner-up",  getPred("QP_RUN"), "#e5e7eb", "1.7em"),
+        qpRow("🥉 3rd Place",  getPred("QP_3RD"), "#fed7aa", "1.3em"),
+        qpRow("4th Place",     getPred("QP_4TH"), "#f1f5f9", "1.1em", "4\uFE0F\u20E3"),
+        e("div", {className: "border-t-2 border-dashed border-amber-300 my-4"}),
+        qpRow("⚽ Golden Boot",  getPred("GOLDEN_BOOT"), "#fffbeb", "1.1em"),
+        qpRow("⭐ Tournament MVP", getPred("MVP"), "#fffbeb", "1.1em")
+      );
+    }
+
+    // --- Progress navigator (own picks only): tap a card to jump to that section ---
+    let progressStrip = null;
+    if (!isRO) {
+      const groupDone = GM.filter(m => /^\d+-\d+$/.test(preds[activeId + "-" + m.id] || "")).length;
+      const KO_IDS = R32.map(m => m.id).concat(R16.map(m => m.id), QF.map(m => m.id), ["M101", "M102", "M103", "M104"]);
+      const bracketDone = KO_IDS.filter(id => resolveKO(id)).length;
+      const quickKeys = ["QP_WIN", "QP_RUN", "QP_3RD", "QP_4TH", "GOLDEN_BOOT", "MVP"];
+      const quickDone = quickKeys.filter(k => ((preds[activeId + "-" + k]) || "").trim()).length;
+      const myMode = preds[pid + "-MODE"];
+      const chip = (label, done, total, t) => e("button", {
+        key: t, onClick: () => setTab(t),
+        className: "flex-1 min-w-[110px] text-left px-3 py-2 rounded-xl transition border " +
+          (done === total ? "bg-emerald-500/25 border-emerald-300/50" : "bg-white/10 border-white/20 hover:bg-white/20")
+      },
+        e("div", {className: "text-[10px] uppercase tracking-wider font-bold " + (done === total ? "text-emerald-200" : "text-blue-100")},
+          label + (done === total ? " \u2713 done" : "")),
+        e("div", {className: "text-white font-bold text-sm"}, done + " / " + total),
+        e("div", {className: "h-1 mt-1 rounded bg-white/15 overflow-hidden"},
+          e("div", {className: "h-full rounded " + (done === total ? "bg-emerald-400" : "bg-amber-400"), style: {width: (total ? Math.round(done / total * 100) : 0) + "%"}}))
+      );
+      const chips = myMode === "quick"
+        ? [chip("Quick Picks", quickDone, 6, "quick"), chip("Group Scores", groupDone, 72, "group"), chip("Bracket", bracketDone, 32, "bracket")]
+        : [chip("Group Scores", groupDone, 72, "group"), chip("Bracket", bracketDone, 32, "bracket"), chip("Quick Picks", quickDone, 6, "quick")];
+      progressStrip = e("div", {className: "mb-4"},
+        e("div", {className: "flex gap-2 flex-wrap"}, chips),
+        e("p", {className: "text-center text-emerald-200/90 text-[11px] font-semibold mt-2"},
+          "\u2713 Auto-save is on - every pick saves instantly, no submit button needed")
+      );
+    }
+
+    // --- Mobile player selector (sidebar is hidden on small screens) ---
+    const mobilePlayerSelect = e("div", {className: "md:hidden mb-4"},
+      e("select", {
+        value: viewId || "",
+        onChange: ev => switchView(ev.target.value || null),
+        className: "w-full px-3 py-3 rounded-xl border-0 text-sm font-semibold bg-white/95 text-blue-900 shadow-lg"
+      },
+        e("option", {value: ""}, "My picks (" + pname + ")"),
+        players.filter(p => p.id !== pid).map(p =>
+          e("option", {key: p.id, value: p.id},
+            "View: " + p.name + (preds[p.id + "-MODE"] === "quick" ? " (Quick Picks)" : ""))
+        )
+      )
+    );
+
     mainView = e("div", null,
-      e("div", {className: "flex gap-2 mb-6 justify-center flex-wrap"},
+      e("div", {className: "flex gap-2 mb-4 justify-center flex-wrap"},
         Tab("Quick Picks", "quick"),
         Tab("Groups", "group"),
         Tab("Standings", "standings"),
@@ -748,6 +962,8 @@ function App() {
         e("button", {key: "live", onClick: () => setLive(true), className: "px-4 py-2 rounded-lg font-semibold text-sm bg-purple-500/80 text-white hover:bg-purple-600"}, "Live"),
         e("button", {key: "out", onClick: logout, className: "px-4 py-2 rounded-lg font-semibold text-sm bg-red-500/80 text-white hover:bg-red-600"}, "Logout (" + pname + ")")
       ),
+      progressStrip,
+      mobilePlayerSelect,
       e("div", {className: "flex gap-4 items-start"},
         e("div", {className: "hidden md:block w-48 flex-shrink-0"},
           e("div", {className: "wc-card rounded-2xl p-4 shadow-2xl"},
@@ -756,13 +972,16 @@ function App() {
               players.map(p =>
                 e("button", {
                   key: p.id,
-                  onClick: () => setViewId(p.id === viewId || p.id === pid ? null : p.id),
-                  className: "w-full text-left px-3 py-2 rounded-lg text-sm font-semibold transition " + (
+                  onClick: () => switchView(p.id === viewId || p.id === pid ? null : p.id),
+                  className: "w-full text-left px-3 py-2 rounded-lg text-sm font-semibold transition flex items-center justify-between gap-1 " + (
                     p.id === pid ? "bg-yellow-100 text-yellow-800" :
                     p.id === viewId ? "bg-blue-600 text-white" :
                     "text-blue-900 hover:bg-blue-50"
                   )
-                }, p.id === pid ? p.name + " (you)" : p.name)
+                },
+                  e("span", {className: "truncate"}, p.id === pid ? p.name + " (you)" : p.name),
+                  preds[p.id + "-MODE"] === "quick" && e("span", {className: "text-[9px] px-1.5 py-0.5 rounded-full font-bold flex-shrink-0 " + (p.id === viewId ? "bg-white/25 text-white" : "bg-amber-200 text-amber-800")}, "QP")
+                )
               )
             ),
             viewId && viewId !== pid && e("button", {
@@ -772,8 +991,9 @@ function App() {
           )
         ),
         e("div", {className: "flex-1 min-w-0"},
-          isRO && e("div", {className: "bg-yellow-50 border border-yellow-300 rounded-xl p-3 mb-4 text-sm font-semibold text-yellow-800"},
-            "Viewing: " + (players.find(p => p.id === viewId) || {}).name + " (read-only)"),
+          isRO && e("div", {className: "bg-yellow-50 border border-yellow-300 rounded-xl p-3 mb-4 text-sm font-semibold text-yellow-800 flex items-center justify-between gap-2 flex-wrap"},
+            e("span", null, "Viewing: " + ((players.find(p => p.id === viewId) || {}).name) + " (read-only)"),
+            e("button", {onClick: () => setViewId(null), className: "px-3 py-1 rounded-lg bg-yellow-200 hover:bg-yellow-300 text-yellow-900 text-xs font-bold"}, "\u2190 Back to my picks")),
           tabContent
         )
       )
@@ -806,6 +1026,17 @@ function App() {
         e("p", {className: "text-amber-300 mt-1 text-xs font-bold", style: {letterSpacing: "5px", textTransform: "uppercase"}}, "Prediction Tracker")
       ),
       mainView
+    ),
+    saveStatus && e("div", {
+      className: "fixed bottom-4 right-4 z-50 px-4 py-2 rounded-full text-sm font-bold shadow-2xl flex items-center gap-2 " + (
+        saveStatus === "saving" ? "bg-blue-600 text-white" :
+        saveStatus === "saved" ? "bg-emerald-600 text-white" :
+        "bg-red-600 text-white"
+      )
+    },
+      saveStatus === "saving" ? "Saving..." :
+      saveStatus === "saved" ? "Saved \u2713" :
+      "Save failed - check connection"
     )
   );
 }

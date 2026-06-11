@@ -28,24 +28,32 @@ body{margin:0;padding:0;font-family:'Inter',system-ui,sans-serif;}
 input,select{transition:border-color .15s ease, box-shadow .15s ease;}
 input:focus,select:focus{box-shadow:0 0 0 3px rgba(59,130,246,.18);}
 button{transition:all .15s ease;}
-.bscroll{overflow-x:auto;overflow-y:hidden;width:100%;max-width:100%;padding-bottom:12px;-webkit-overflow-scrolling:touch;}
-.bwrap{display:flex;gap:8px;width:max-content;}
-.bcol{display:flex;flex-direction:column;flex:0 0 170px;width:170px;}
-.bcolh{text-align:center;font-weight:800;font-size:11px;letter-spacing:1.5px;color:#dbeafe;background:rgba(30,64,175,.85);padding:9px 4px;border-radius:8px;margin-bottom:8px;}
-.bcolh.final{background:linear-gradient(120deg,#fbbf24,#f59e0b);color:#3b2403;}
-.bmatches{display:flex;flex-direction:column;flex:1;justify-content:space-around;gap:6px;}
+.bscroll{overflow-x:auto;overflow-y:hidden;width:100%;max-width:100%;padding-bottom:16px;-webkit-overflow-scrolling:touch;}
+.bwrap{display:flex;gap:40px;align-items:center;width:max-content;position:relative;padding:8px 4px;}
+.bcol{display:flex;flex-direction:column;flex:0 0 182px;width:182px;}
+.bcolh{text-align:center;font-weight:800;font-size:11px;letter-spacing:1.2px;color:#dbeafe;background:rgba(30,64,175,.85);padding:9px 4px;border-radius:8px;margin-bottom:12px;}
+.bmatches{display:flex;flex-direction:column;flex:1;justify-content:space-around;gap:14px;}
 .bmatch{border:1.5px solid #2a4a8f;border-radius:10px;overflow:hidden;background:white;box-shadow:0 3px 10px rgba(3,12,32,.12);transition:box-shadow .18s ease, transform .18s ease;}
 .bmatch:hover{box-shadow:0 8px 22px rgba(3,12,32,.22);transform:translateY(-1px);}
-.bteam{padding:7px 8px;font-size:12px;font-weight:600;color:#1e3a5f;background:#f0f9ff;border-bottom:1px solid #e2e8f0;}
+.bmatch.final-card{border:2.5px solid #f59e0b;box-shadow:0 6px 28px rgba(245,158,11,.28),0 3px 12px rgba(3,12,32,.15);}
+.bteam{padding:9px 10px;font-size:12px;font-weight:600;color:#1e3a5f;background:#f0f9ff;border-bottom:1px solid #e2e8f0;}
+.bteam.final-card-team{padding:16px 14px;font-size:14px;font-weight:700;}
 .bteam.won{background:linear-gradient(90deg,#bbf7d0,#6ee7b7);color:#065f46;}
 .bteam.tbd{color:#94a3b8;font-style:italic;}
-.bvs{padding:3px 8px;font-size:10px;text-align:center;color:#64748b;background:white;}
-.bsel{width:100%;padding:5px 6px;font-size:11px;border:none;border-top:1px solid #e2e8f0;background:#fefce8;color:#1e3a5f;font-weight:600;cursor:pointer;}
+.bvs{padding:5px 8px;font-size:10px;text-align:center;color:#64748b;background:white;}
+.bvs.final-card-vs{padding:11px 10px;font-size:12px;font-weight:700;color:#92400e;background:#fffbeb;}
+.bsel{width:100%;padding:6px 8px;font-size:11px;border:none;border-top:1px solid #e2e8f0;background:#fefce8;color:#1e3a5f;font-weight:600;cursor:pointer;}
 .bsel:focus{outline:none;background:#fef08a;}
-.bdisabled{padding:5px 6px;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;text-align:center;font-style:italic;}
+.bdisabled{padding:6px 8px;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;text-align:center;font-style:italic;}
 .bscroll::-webkit-scrollbar{height:10px;}
 .bscroll::-webkit-scrollbar-track{background:rgba(30,64,175,.08);border-radius:6px;}
 .bscroll::-webkit-scrollbar-thumb{background:linear-gradient(90deg,#3b82f6,#10b981);border-radius:6px;}
+/* centre column: positioned so Final card aligns with the SF row */
+.bcentre{flex:0 0 252px;width:252px;display:flex;flex-direction:column;align-items:stretch;align-self:flex-start;}
+.bcentre-podium{width:100%;margin-bottom:36px;}
+.bcentre-final{width:100%;}
+.bcentre-bronze{width:82%;margin-top:28px;margin-left:auto;margin-right:auto;opacity:0.9;}
+/* bracket flow connectors drawn by BracketLines SVG overlay */
 </style>
 </head>
 <body>
@@ -738,7 +746,20 @@ function App() {
       );
       tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
         e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Quick Picks"),
-        e("p", {className: "text-gray-500 text-sm mb-6"}, "The casual route: call the podium and the individual awards. No bracket required. Quick Picks lock for everyone when the knockout stage kicks off (" + fmtKO(KNOCKOUT_LOCK) + " your time)."),
+        e("div", {className: "flex items-start justify-between gap-3 flex-wrap mb-6"},
+          e("p", {className: "text-gray-500 text-sm flex-1"}, "The casual route: call the podium and the individual awards. No bracket required. Quick Picks lock for everyone when the knockout stage kicks off (" + fmtKO(KNOCKOUT_LOCK) + " your time)."),
+          !isRO && !bracketLocked && e("button", {
+            onClick: () => {
+              const shuffle = arr => arr.slice().sort(() => Math.random() - 0.5);
+              const t = shuffle(ALL_TEAMS); const p = shuffle(ALL_TEAMS);
+              [["QP_WIN",t[0]],["QP_RUN",t[1]],["QP_3RD",t[2]],["QP_4TH",t[3]],["GOLDEN_BOOT",p[4]],["MVP",p[5]]].forEach(([k,v])=>{
+                const key = pid+"-"+k; recentEdits.current[key]=Date.now();
+                setPreds(prev=>({...prev,[key]:v})); persist(key,v);
+              });
+            },
+            className: "flex-shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white text-sm font-bold shadow-lg hover:shadow-xl hover:scale-105 transition-all"
+          }, "🎲 Re-roll C.B.F.")
+        ),
         bracketLocked && e("div", {className: "bg-gray-100 border border-gray-300 rounded-xl p-3 mb-4 text-sm font-semibold text-gray-600"},
           "\uD83D\uDD12 Quick Picks are locked - the knockout stage is underway."),
         e("div", {className: "max-w-xl"},
@@ -819,69 +840,249 @@ function App() {
         e("p", {className: "text-gray-500 text-sm mb-4"}, "Official FIFA format: 12 group winners + 12 runners-up + 8 best third-placed teams. Teams auto-fill from your group predictions. " +
           (bracketLocked ? "\uD83D\uDD12 The bracket is locked - the knockout stage is underway." : "All bracket picks lock when the knockout stage kicks off: " + fmtKO(KNOCKOUT_LOCK) + " (your local time).")),
         (() => {
-          // Mirrored bracket: Pathway 1 (left) and Pathway 2 (right) meet at the Final
           const P1_R32 = ["M74","M77","M73","M75","M83","M84","M81","M82"];
           const P2_R32 = ["M76","M78","M79","M80","M86","M88","M85","M87"];
           const P1_R16 = ["M89","M90","M93","M94"];
           const P2_R16 = ["M91","M92","M95","M96"];
-          const P1_QF = ["M97","M98"];
-          const P2_QF = ["M99","M100"];
-          const r32m = (id) => { const m = R32.find(x => x.id === id); return renderBMatch({key: m.id, mid: m.id, t1: slots[m.s1], t2: slots[m.s2], date: m.d, label: m.id}); };
-          const kom = (arr, id) => { const m = arr.find(x => x.id === id); return renderBMatch({key: m.id, mid: m.id, t1: gKO(m.f1), t2: gKO(m.f2), date: m.d, label: m.id, waitingOn: m.f1 + " & " + m.f2}); };
-          const col = (title, items, isFinal) => e("div", {className: "bcol"},
-            e("div", {className: "bcolh" + (isFinal ? " final" : "")}, title),
-            e("div", {className: "bmatches", style: isFinal ? {justifyContent: "center"} : null}, items)
+          const P1_QF  = ["M97","M98"];
+          const P2_QF  = ["M99","M100"];
+          const r32m = (id) => { const m = R32.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:slots[m.s1], t2:slots[m.s2], date:m.d, label:m.id}); };
+          const kom  = (arr,id) => { const m = arr.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:gKO(m.f1), t2:gKO(m.f2), date:m.d, label:m.id, waitingOn:m.f1+" & "+m.f2}); };
+          const col  = (title, items) => e("div", {className:"bcol"},
+            e("div", {className:"bcolh"}, title),
+            e("div", {className:"bmatches"}, items)
           );
-          return e("div", {className: "bscroll"},
-            e("div", {className: "bwrap"},
-              col("R32", P1_R32.map(id => r32m(id))),
-              col("R16", P1_R16.map(id => kom(R16, id))),
-              col("QF", P1_QF.map(id => kom(QF, id))),
-              col("SF", [kom(SF, "M101")]),
-              (() => {
-                const finalT1 = gKO("M101"), finalT2 = gKO("M102");
-                const champ = gKO("M104");
-                const runner = (champ && finalT1 && finalT2) ? (champ === finalT1 ? finalT2 : finalT1) : null;
-                const third = gKO("M103");
-                const podiumSlot = (rank, label, team, bg, flagSz, nameSz, medal) =>
-                  e("div", {key: rank, style: {display:"flex", alignItems:"center", gap:"8px", padding:"6px 8px", borderRadius:"8px", marginBottom:"4px", background: bg || "transparent"}},
-                    e("span", {style: {fontSize: flagSz, lineHeight:1, flexShrink:0}}, team ? getFlag(team) : "\u2753"),
-                    e("div", {style: {flex:1, minWidth:0}},
-                      e("div", {style: {fontSize:"10px", fontWeight:800, color:"#92400e", letterSpacing:"0.05em"}}, medal + " " + label),
-                      e("div", {style: {fontSize: nameSz, fontWeight:700, color: team ? "#1e3a5f" : "#b8b8b8", fontStyle: team ? "normal" : "italic", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}, team || "TBD")
-                    )
-                  );
-                const podium = e("div", {key: "podium", style: {marginTop: "12px", border: "2px solid #f59e0b", borderRadius: "10px", background: "#fffbeb", padding: "10px"}},
-                  e("div", {style: {fontWeight: 800, color: "#92400e", textAlign: "center", marginBottom: "8px", fontSize: "11px", letterSpacing:"0.15em"}},"🏆 PODIUM"),
-                  podiumSlot(1, "CHAMPION",  champ,  "#fde68a", "2.4em", "14px", "🥇"),
-                  podiumSlot(2, "Runner-up", runner, "#e5e7eb", "1.8em", "12px", "🥈"),
-                  podiumSlot(3, "3rd Place", third,  "#fed7aa", "1.4em", "11px", "🥉"),
-                  e("div", {style: {borderTop: "1px dashed #f59e0b", margin: "6px 0"}}),
-                  e("div", {key:"gb", style:{display:"flex",justifyContent:"space-between",padding:"3px 6px",borderRadius:"5px",marginBottom:"2px"}},
-                    e("span", {style:{fontWeight:700,color:"#92400e",fontSize:"10px"}}, "\u26BD Golden Boot"),
-                    e("span", {style:{fontWeight:700,color: getPred("GOLDEN_BOOT") ? "#1e3a5f" : "#b8b8b8",fontSize:"10px",fontStyle: getPred("GOLDEN_BOOT") ? "normal":"italic"}}, getPred("GOLDEN_BOOT") || "TBD")
-                  ),
-                  e("div", {key:"mvp", style:{display:"flex",justifyContent:"space-between",padding:"3px 6px",borderRadius:"5px"}},
-                    e("span", {style:{fontWeight:700,color:"#92400e",fontSize:"10px"}}, "\u2B50 MVP"),
-                    e("span", {style:{fontWeight:700,color: getPred("MVP") ? "#1e3a5f" : "#b8b8b8",fontSize:"10px",fontStyle: getPred("MVP") ? "normal":"italic"}}, getPred("MVP") || "TBD")
-                  )
+
+          // Larger gold-bordered Final card
+          const renderFinalMatch = (props) => {
+            const pr = getPred(props.mid);
+            const opts = [props.t1, props.t2].filter(Boolean);
+            const validPick = opts.indexOf(pr) !== -1 ? pr : "";
+            let action;
+            if (opts.length === 2 && !isRO && !bracketLocked)
+              action = e("select", {value:validPick, onChange:ev=>setKO(props.mid,ev.target.value), className:"bsel"},
+                e("option",{value:""},"Pick champion"),
+                opts.map(t=>e("option",{key:t,value:t},t))
+              );
+            else if (opts.length === 2 && !isRO && bracketLocked)
+              action = e("div",{className:"bdisabled"}, pr ? "\uD83D\uDD12 "+pr : "\uD83D\uDD12 Locked - no pick");
+            else if (opts.length === 2 && isRO)
+              action = e("div",{className:"bdisabled"}, pr ? "Picked: "+pr : "No pick yet");
+            else
+              action = e("div",{className:"bdisabled"}, "Awaiting SF winners");
+            return e("div", {className:"bmatch final-card"},
+              e("div", {className:"bteam final-card-team"+(validPick===props.t1&&props.t1?" won":!props.t1?" tbd":"")},
+                props.t1 ? getFlag(props.t1)+"\u00A0"+props.t1 : "TBD"),
+              e("div", {className:"bvs final-card-vs"}, "\uD83C\uDFC6 FINAL \u00B7 Jul 19"),
+              e("div", {className:"bteam final-card-team"+(validPick===props.t2&&props.t2?" won":!props.t2?" tbd":"")},
+                props.t2 ? getFlag(props.t2)+"\u00A0"+props.t2 : "TBD"),
+              action
+            );
+          };
+
+          // SVG overlay: measures real .bmatch positions, draws arrows with correct tips
+          const BracketLines = ({wrapRef, centreRef}) => {
+            const [segs, setSegs] = React.useState([]);
+            React.useEffect(() => {
+              const draw = () => {
+                const wrap = wrapRef.current;
+                const centre = centreRef.current;
+                if (!wrap) return;
+                const wr = wrap.getBoundingClientRect();
+                const allCols = Array.from(wrap.querySelectorAll(".bcol"));
+                const colCards = allCols.map(col =>
+                  Array.from(col.querySelectorAll(".bmatch")).map(c => {
+                    const r = c.getBoundingClientRect();
+                    return {xR:r.right-wr.left, xL:r.left-wr.left, y:r.top-wr.top+r.height/2};
+                  })
                 );
-                const bronze = e("div", {key: "bronzewrap", style: {marginTop: "12px"}},
-                  e("div", {style: {textAlign: "center", fontWeight: 800, fontSize: "11px", color: "#92400e", background: "#fed7aa", borderRadius: "6px", padding: "4px", marginBottom: "6px"}}, "BRONZE FINAL - Jul 18"),
-                  renderBMatch({mid: "M103", t1: sfLoser("M101"), t2: sfLoser("M102"), date: "Jul 18", label: "M103", waitingOn: "M101 & M102"})
-                );
-                return col("FINAL - Jul 19", [
-                  renderBMatch({key: "M104", mid: "M104", t1: finalT1, t2: finalT2, date: "Jul 19", label: "M104", isF: true, waitingOn: "M101 & M102"}),
-                  bronze,
-                  podium
-                ], true);
-              })(),
-              col("SF", [kom(SF, "M102")]),
-              col("QF", P2_QF.map(id => kom(QF, id))),
-              col("R16", P2_R16.map(id => kom(R16, id))),
-              col("R32", P2_R32.map(id => r32m(id)))
-            )
-          );
+                // col indices: 0=P1_R32(8), 1=P1_R16(4), 2=P1_QF(2), 3=P1_SF(1),
+                //              [centre .bcentre not .bcol]
+                //              4=P2_SF(1), 5=P2_QF(2), 6=P2_R16(4), 7=P2_R32(8)
+
+                // ── Align Final card midpoint with SF card midpoint ─────────────
+                // With align-items:center, the SF card sits at the vertical middle of the wrap.
+                // We need padding-top on the centre column so Final card midpoint = SF card midpoint.
+                const finalCard = wrap.querySelector(".final-card");
+                if (centre && finalCard && colCards[3] && colCards[3][0]) {
+                  const sfCard = allCols[3] && allCols[3].querySelector(".bmatch");
+                  if (sfCard) {
+                    const sfR   = sfCard.getBoundingClientRect();
+                    const sfMid = sfR.top - wr.top + sfR.height / 2; // SF midpoint relative to wrap
+                    // Elements above the Final card inside bcentre:
+                    const podiumEl     = centre.querySelector(".bcentre-podium");
+                    const podiumH      = podiumEl ? podiumEl.getBoundingClientRect().height : 0;
+                    const podiumMargin = 36; // bcentre-podium margin-bottom
+                    const finalLabelEl = centre.querySelector(".bcentre-final > div:first-child");
+                    const finalLabelH  = finalLabelEl ? finalLabelEl.getBoundingClientRect().height : 28;
+                    const finalLabelMb = 10; // margin-bottom on the label div
+                    const fcR          = finalCard.getBoundingClientRect();
+                    const finalCardH   = fcR.height;
+                    // Without any padding-top, the Final card midpoint is at:
+                    // podiumH + podiumMargin + finalLabelH + finalLabelMb + finalCardH/2
+                    // We want that to equal sfMid, so:
+                    const naturalFinalMid = podiumH + podiumMargin + finalLabelH + finalLabelMb + finalCardH / 2;
+                    const needed = Math.max(0, sfMid - naturalFinalMid);
+                    centre.style.paddingTop = needed + "px";
+                  }
+                }
+
+                // Re-measure after padding adjustment (next frame)
+                const buildSegs = () => {
+                  const finalCard2 = wrap.querySelector(".final-card");
+                  if (!finalCard2) return;
+                  const fc2R = finalCard2.getBoundingClientRect();
+                  const fc = {xL:fc2R.left-wr.left, xR:fc2R.right-wr.left, y:fc2R.top-wr.top+fc2R.height/2};
+
+                  // Arrow size — path stops behind the arrowhead tip
+                  const AH = 9; // arrowhead depth in px — path terminates this far before tip
+
+                  // Regular column pairs: cubic bezier, path ends AH px behind arrowhead tip
+                  const makePairs = (lCol, rCol, dir) => {
+                    const out = [];
+                    if (!lCol || !rCol || !lCol.length || !rCol.length) return out;
+                    rCol.forEach((dst, i) => {
+                      [lCol[i*2], lCol[i*2+1]].filter(Boolean).forEach(src => {
+                        const x0  = dir==="ltr" ? src.xR + 4 : src.xL - 4;
+                        const tip = dir==="ltr" ? dst.xL - 4 : dst.xR + 4;
+                        const x1  = dir==="ltr" ? tip - AH    : tip + AH; // path ends before tip
+                        const mx  = (x0 + x1) / 2;
+                        out.push({d:`M${x0},${src.y} C${mx},${src.y} ${mx},${dst.y} ${x1},${dst.y}`,
+                                  dir, tip, ay:dst.y});
+                      });
+                    });
+                    return out;
+                  };
+
+                  // SF → Final: straight horizontal lines (no curve) — Final is now at SF height
+                  const sfSegs = [];
+                  const sfL = colCards[3] && colCards[3][0];
+                  const sfR = colCards[4] && colCards[4][0];
+                  if (sfL) {
+                    const x0  = sfL.xR + 4;
+                    const tip = fc.xL - 4;
+                    const x1  = tip - AH;
+                    sfSegs.push({d:`M${x0},${sfL.y} L${x1},${sfL.y}`, dir:"ltr", tip, ay:sfL.y});
+                  }
+                  if (sfR) {
+                    const x0  = sfR.xL - 4;
+                    const tip = fc.xR + 4;
+                    const x1  = tip + AH;
+                    sfSegs.push({d:`M${x0},${sfR.y} L${x1},${sfR.y}`, dir:"rtl", tip, ay:sfR.y});
+                  }
+
+                  setSegs([
+                    ...makePairs(colCards[0],colCards[1],"ltr"),
+                    ...makePairs(colCards[1],colCards[2],"ltr"),
+                    ...makePairs(colCards[2],colCards[3],"ltr"),
+                    ...makePairs(colCards[7],colCards[6],"rtl"),
+                    ...makePairs(colCards[6],colCards[5],"rtl"),
+                    ...makePairs(colCards[5],colCards[4],"rtl"),
+                    ...sfSegs
+                  ]);
+                };
+                // Small delay so padding-top layout settles before re-measuring
+                setTimeout(buildSegs, 30);
+              };
+              const t = setTimeout(draw, 180);
+              const ro = new ResizeObserver(draw);
+              if (wrapRef.current) ro.observe(wrapRef.current);
+              return () => { clearTimeout(t); ro.disconnect(); };
+            }, [wrapRef, centreRef]);
+
+            if (!segs.length || !wrapRef.current) return null;
+            const W = wrapRef.current.scrollWidth, H = wrapRef.current.scrollHeight;
+
+            // Arrowhead: solid filled triangle, tip at (seg.tip, seg.ay)
+            // Path terminates AH px before the tip so the line doesn't poke through
+            const AH = 9;
+            const arrowHead = (seg, i) => {
+              const col = seg.dir==="ltr" ? "rgba(99,179,237,0.65)" : "rgba(167,139,250,0.65)";
+              const hw = AH * 0.55; // half-width of arrowhead base
+              const pts = seg.dir==="ltr"
+                ? `${seg.tip},${seg.ay} ${seg.tip-AH},${seg.ay-hw} ${seg.tip-AH},${seg.ay+hw}`
+                : `${seg.tip},${seg.ay} ${seg.tip+AH},${seg.ay-hw} ${seg.tip+AH},${seg.ay+hw}`;
+              return e("polygon",{key:"ah"+i, points:pts, fill:col, stroke:"none"});
+            };
+            return e("svg",{style:{position:"absolute",top:0,left:0,width:W,height:H,pointerEvents:"none",zIndex:0},viewBox:`0 0 ${W} ${H}`},
+              e("defs",null,
+                e("filter",{id:"bglow"},
+                  e("feGaussianBlur",{stdDeviation:"1.0",result:"b"}),
+                  e("feMerge",null,e("feMergeNode",{in:"b"}),e("feMergeNode",{in:"SourceGraphic"}))
+                )
+              ),
+              segs.map((seg,i) => e("g",{key:i,filter:"url(#bglow)"},
+                e("path",{d:seg.d,fill:"none",
+                  stroke:seg.dir==="ltr"?"rgba(99,179,237,0.40)":"rgba(167,139,250,0.40)",
+                  strokeWidth:"2.2",strokeLinecap:"butt"}),
+                arrowHead(seg,i)
+              ))
+            );
+          };
+
+          // Centre column: podium (top, separated) → Final (aligned with SF) → Bronze (offset below)
+          const CentreCol = ({centreRef}) => {
+            const finalT1 = gKO("M101"), finalT2 = gKO("M102");
+            const champ   = gKO("M104");
+            const runner  = (champ&&finalT1&&finalT2) ? (champ===finalT1?finalT2:finalT1) : null;
+            const third   = gKO("M103");
+            const slot = (rank,label,team,bg,fsz,nsz,medal) =>
+              e("div",{key:rank,style:{display:"flex",alignItems:"center",gap:"8px",padding:"6px 10px",borderRadius:"8px",marginBottom:"4px",background:bg||"transparent"}},
+                e("span",{style:{fontSize:fsz,lineHeight:1,flexShrink:0}}, team?getFlag(team):"\u2753"),
+                e("div",{style:{flex:1,minWidth:0}},
+                  e("div",{style:{fontSize:"10px",fontWeight:800,color:"#92400e",letterSpacing:"0.05em"}},medal+" "+label),
+                  e("div",{style:{fontSize:nsz,fontWeight:700,color:team?"#1e3a5f":"#b8b8b8",fontStyle:team?"normal":"italic",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},team||"TBD")
+                )
+              );
+            const podium = e("div",{className:"bcentre-podium",style:{border:"2.5px solid #f59e0b",borderRadius:"12px",background:"linear-gradient(145deg,#fffbeb,#fef3c7)",padding:"12px",boxShadow:"0 4px 20px rgba(245,158,11,.22)"}},
+              e("div",{style:{fontWeight:800,color:"#92400e",textAlign:"center",marginBottom:"10px",fontSize:"12px",letterSpacing:"0.12em"}},"\uD83C\uDFC6 PODIUM"),
+              slot(1,"CHAMPION", champ,  "#fde68a","2.6em","15px","\uD83E\uDD47"),
+              slot(2,"Runner-up",runner, "#e5e7eb","1.9em","12px","\uD83E\uDD48"),
+              slot(3,"3rd Place",third,  "#fed7aa","1.5em","11px","\uD83E\uDD49"),
+              e("div",{style:{borderTop:"1px dashed #f59e0b",margin:"8px 0"}}),
+              e("div",{style:{display:"flex",justifyContent:"space-between",padding:"3px 6px"}},
+                e("span",{style:{fontWeight:700,color:"#92400e",fontSize:"10px"}},"\u26BD Golden Boot"),
+                e("span",{style:{fontWeight:700,color:getPred("GOLDEN_BOOT")?"#1e3a5f":"#b8b8b8",fontSize:"10px",fontStyle:getPred("GOLDEN_BOOT")?"normal":"italic"}},getPred("GOLDEN_BOOT")||"TBD")
+              ),
+              e("div",{style:{display:"flex",justifyContent:"space-between",padding:"3px 6px",marginTop:"2px"}},
+                e("span",{style:{fontWeight:700,color:"#92400e",fontSize:"10px"}},"\u2B50 MVP"),
+                e("span",{style:{fontWeight:700,color:getPred("MVP")?"#1e3a5f":"#b8b8b8",fontSize:"10px",fontStyle:getPred("MVP")?"normal":"italic"}},getPred("MVP")||"TBD")
+              )
+            );
+            const finalMatch = e("div",{className:"bcentre-final"},
+              e("div",{style:{textAlign:"center",marginBottom:"10px",display:"flex",alignItems:"center",gap:"8px",justifyContent:"center"}},
+                e("div",{style:{flex:1,height:"1px",background:"linear-gradient(to right,transparent,rgba(245,158,11,0.4))"}}),
+                e("div",{style:{fontWeight:800,fontSize:"11px",letterSpacing:"1.5px",color:"#3b2403",background:"linear-gradient(120deg,#fbbf24,#f59e0b)",padding:"7px 14px",borderRadius:"20px",whiteSpace:"nowrap"}},"FINAL — Jul 19"),
+                e("div",{style:{flex:1,height:"1px",background:"linear-gradient(to left,transparent,rgba(245,158,11,0.4))"}})
+              ),
+              renderFinalMatch({mid:"M104",t1:finalT1,t2:finalT2})
+            );
+            const bronze = e("div",{className:"bcentre-bronze"},
+              e("div",{style:{textAlign:"center",fontWeight:800,fontSize:"10px",color:"#92400e",background:"#fed7aa",borderRadius:"6px",padding:"3px",marginBottom:"5px"}},"BRONZE \u00B7 Jul 18"),
+              renderBMatch({mid:"M103",t1:sfLoser("M101"),t2:sfLoser("M102"),date:"Jul 18",label:"M103",waitingOn:"M101 & M102"})
+            );
+            return e("div",{className:"bcentre", ref:centreRef}, podium, finalMatch, bronze);
+          };
+
+          const BracketWrap = () => {
+            const wrapRef   = useRef(null);
+            const centreRef = useRef(null);
+            return e("div",{className:"bscroll"},
+              e("div",{className:"bwrap",ref:wrapRef,style:{position:"relative"}},
+                e(BracketLines,{wrapRef, centreRef}),
+                col("Round of 32", P1_R32.map(id=>r32m(id))),
+                col("Round of 16", P1_R16.map(id=>kom(R16,id))),
+                col("Quarter Final", P1_QF.map(id=>kom(QF,id))),
+                col("Semi Final", [kom(SF,"M101")]),
+                e(CentreCol,{key:"centre", centreRef}),
+                col("Semi Final", [kom(SF,"M102")]),
+                col("Quarter Final", P2_QF.map(id=>kom(QF,id))),
+                col("Round of 16", P2_R16.map(id=>kom(R16,id))),
+                col("Round of 32", P2_R32.map(id=>r32m(id)))
+              )
+            );
+          };
+          return e(BracketWrap, {key:"bwrap"});
         })()
       );
     }
@@ -1002,10 +1203,33 @@ function App() {
 
   if (started && pid && !preds[pid + "-MODE"]) {
     const choose = (mode, t) => { setKO("MODE", mode); setTab(t); };
+    // C.B.F. randomiser: sets MODE=quick and randomly fills all QP fields
+    const cbf = () => {
+      const shuffle = arr => arr.slice().sort(() => Math.random() - 0.5);
+      const teams = shuffle(ALL_TEAMS);
+      const pool  = shuffle(ALL_TEAMS); // reuse team list for boot/mvp picks
+      const saves = [
+        ["MODE",         "quick"],
+        ["QP_WIN",       teams[0]],
+        ["QP_RUN",       teams[1]],
+        ["QP_3RD",       teams[2]],
+        ["QP_4TH",       teams[3]],
+        ["GOLDEN_BOOT",  pool[4]],
+        ["MVP",          pool[5]],
+      ];
+      // All saves fire in order; use the existing persist wrapper
+      saves.forEach(([k, v]) => {
+        const key = pid + "-" + k;
+        recentEdits.current[key] = Date.now();
+        setPreds(prev => ({...prev, [key]: v}));
+        persist(key, v);
+      });
+      setTab("quick");
+    };
     mainView = e("div", {className: "wc-card rounded-2xl p-8 shadow-2xl max-w-2xl mx-auto text-center"},
       e("h2", {className: "text-3xl font-bold text-blue-900 mb-2"}, "Welcome, " + pname + "!"),
       e("p", {className: "text-gray-500 mb-8"}, "How do you want to play?"),
-      e("div", {className: "grid grid-cols-1 md:grid-cols-2 gap-4"},
+      e("div", {className: "grid grid-cols-1 md:grid-cols-3 gap-4"},
         e("button", {onClick: () => choose("full", "group"), className: "p-6 rounded-xl border-2 border-blue-300 bg-blue-50 hover:border-blue-600 hover:shadow-lg transition text-left"},
           e("div", {className: "text-xl font-bold text-blue-900 mb-2"}, "Full Bracket"),
           e("div", {className: "text-sm text-gray-600"}, "Predict all 72 group scores, then pick every knockout match through to the Final. Maximum bragging rights.")
@@ -1013,9 +1237,15 @@ function App() {
         e("button", {onClick: () => choose("quick", "quick"), className: "p-6 rounded-xl border-2 border-amber-400 bg-amber-50 hover:border-amber-500 hover:shadow-lg transition text-left"},
           e("div", {className: "text-xl font-bold text-amber-700 mb-2"}, "Quick Picks"),
           e("div", {className: "text-sm text-gray-600"}, "Short on time? Just call the Champion, Runner-up, 3rd and 4th place, plus Golden Boot and MVP.")
+        ),
+        e("button", {onClick: cbf, className: "p-6 rounded-xl border-2 border-purple-400 bg-gradient-to-br from-purple-50 to-pink-50 hover:border-purple-600 hover:shadow-xl transition text-left group"},
+          e("div", {className: "text-2xl mb-1"}, "🎲"),
+          e("div", {className: "text-xl font-bold text-purple-800 mb-2"}, "C.B.F. Button"),
+          e("div", {className: "text-xs font-bold text-purple-500 mb-2 tracking-wider"}, "CLUELESS BUT FOMO"),
+          e("div", {className: "text-sm text-gray-600"}, "No idea who'll win? Let fate decide. Randomises your entire Quick Pick in one tap. You have nothing to lose — except possibly your dignity.")
         )
       ),
-      e("p", {className: "text-xs text-gray-400 mt-6"}, "Not locked in - you can do both at any time using the tabs.")
+      e("p", {className: "text-xs text-gray-400 mt-6"}, "Not locked in — you can switch between tabs at any time.")
     );
   }
 

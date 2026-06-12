@@ -414,12 +414,9 @@ function App() {
   const [groupView, setGroupView] = useState("date");
   const [adminMode, setAdminMode] = useState(false);
   const [adminPwInput, setAdminPwInput] = useState("");
-  const ADMIN_PASSWORD = "wc2026admin";
-  const [apiKey, setApiKey] = useState("");
-  const [apiKeyInput, setApiKeyInput] = useState("");
-  const [syncStatus, setSyncStatus] = useState(null); // null | "syncing" | "ok" | "error" | "no_key"
+  const ADMIN_PASSWORD = "Rollopollo";
+  const [syncStatus, setSyncStatus] = useState(null);
   const [lastSynced, setLastSynced] = useState(null);
-  const syncTimer = useRef(null);
   const recentEdits = useRef({});
   const saveTimer = useRef(null);
 
@@ -456,7 +453,6 @@ function App() {
           });
         }
         if (d.results) setResults(d.results);
-        if (d.apiKey) setApiKey(d.apiKey);
         if (d.tournamentStarted) setStarted(true);
       }
       setNowTick(Date.now());
@@ -468,84 +464,126 @@ function App() {
   }, []);
 
   // ---- AUTO-SYNC from wc2026api.com ----
-  // Maps wc2026api match_number (1-72 group, 73-104 KO) to our match IDs
-  // Group matches: match_number 1-72 maps to GM array index (0-based) → GM[n-1].id
-  // KO matches: match_number 73-104 maps to "M73"-"M104"
-  const WC_API = "https://api.wc2026api.com";
-
-  // Normalise team names that may differ between wc2026api and our GT data
-  const TEAM_NAME_MAP = {
-    "Bosnia and Herzegovina":"Bosnia-Herzegovina",
-    "Bosnia & Herzegovina":"Bosnia-Herzegovina",
-    "Türkiye":"Turkiye","Turkey":"Turkiye",
-    "DR Congo":"Congo DR","Congo, DR":"Congo DR","Democratic Republic of Congo":"Congo DR",
-    "Ivory Coast":"Ivory Coast","Côte d'Ivoire":"Ivory Coast",
-    "Czech Republic":"Czechia","Czechia":"Czechia",
-    "United States":"United States","USA":"United States",
-    "Cape Verde Islands":"Cape Verde","Cabo Verde":"Cape Verde",
-    "South Korea":"South Korea","Korea Republic":"South Korea",
-    "Curacao":"Curacao","Curaçao":"Curacao",
-  };
-  const normTeam = (name) => {
-    if (!name) return name;
-    return TEAM_NAME_MAP[name] || name;
-  };
-
-  const syncLiveScores = async (key) => {
-    if (!key) { setSyncStatus("no_key"); return; }
+  const syncLiveScores = async () => {
     setSyncStatus("syncing");
     try {
-      const res = await fetch(WC_API + "/matches", {
-        headers: { "Authorization": "Bearer " + key }
-      });
-      if (!res.ok) {
-        setSyncStatus("error");
-        return;
-      }
+      const res = await fetch(
+        "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json"
+      );
+      if (!res.ok) { setSyncStatus("error"); return; }
       const data = await res.json();
-      // wc2026api returns either an array or { matches: [...] } or { data: [...] }
-      const matches = Array.isArray(data) ? data :
-                      (data.matches || data.data || []);
+      const matches = data.matches || [];
+
+      // Team name differences between openfootball and our app
+      const TN = {
+        "Bosnia & Herzegovina": "Bosnia-Herzegovina",
+        "Czech Republic":       "Czechia",
+        "Cura\u00e7ao":         "Curacao",
+        "DR Congo":             "Congo DR",
+        "Turkey":               "Turkiye",
+        "USA":                  "United States",
+        "South Korea":          "South Korea",
+        "Ivory Coast":          "Ivory Coast",
+      };
+      const norm = t => TN[t] || t;
+
+      // Build a lookup from "team1|team2" → our GM match id
+      const gmLookup = {};
+      GM.forEach(m => {
+        gmLookup[m.t1 + "|" + m.t2] = m.id;
+        gmLookup[m.t2 + "|" + m.t1] = m.id; // handle flipped order
+      });
 
       const updates = {};
-      matches.forEach(m => {
-        const num = m.match_number;
-        const phase = (m.phase || m.status || "").toUpperCase();
-        const isFinished = phase === "FT" || phase === "FT_PEN" ||
-                           phase === "FINISHED" || phase === "COMPLETE" ||
-                           m.status === "finished";
-        if (!isFinished) return;
-        const hs = m.home_score, as_ = m.away_score;
-        if (hs === null || hs === undefined || as_ === null || as_ === undefined) return;
 
-        if (num >= 1 && num <= 72) {
-          // Group match
-          const gm = GM[num - 1];
-          if (gm) {
-            updates[gm.id] = hs + "-" + as_;
+      matches.forEach(m => {
+        if (!m.score) return; // no result yet
+        const sc = m.score;
+        const ft = sc.ft; // [score1, score2] at full time
+        if (!ft) return;
+
+        const t1 = norm(m.team1);
+        const t2 = norm(m.team2);
+
+        if (m.group) {
+          // Group stage match — store as "score1-score2"
+          // Try direct key first, then flipped
+          const id = gmLookup[t1 + "|" + t2] || gmLookup[t2 + "|" + t1];
+          if (id) {
+            // If teams are flipped vs our data, swap scores
+            const gm = GM.find(x => x.id === id);
+            if (gm && gm.t1 === t2) {
+              updates[id] = ft[1] + "-" + ft[0]; // swap
+            } else {
+              updates[id] = ft[0] + "-" + ft[1];
+            }
           }
-        } else if (num >= 73 && num <= 104) {
-          // KO match — store winning team name
-          const mid = "M" + num;
-          const homeTeam = normTeam(m.home_team);
-          const awayTeam = normTeam(m.away_team);
-          if (parseInt(hs) > parseInt(as_)) updates[mid] = homeTeam;
-          else if (parseInt(as_) > parseInt(hs)) updates[mid] = awayTeam;
-          // draws in KO go to penalties — use FT_PEN phase and winning team if API provides it
-          else if (m.winner) updates[mid] = normTeam(m.winner);
+        } else {
+          // Knockout match — team names are W73/W74 placeholders until known
+          // openfootball uses W73..W104 for KO match winners
+          // round field tells us which round it is
+          // We identify by the winning team name once scores are in
+          const round = (m.round || "").toLowerCase();
+          // Determine winner
+          let winner = null;
+          if (sc.p) {
+            // Penalties — winner is whoever won the shootout
+            winner = sc.p[0] > sc.p[1] ? t1 : t2;
+          } else if (ft[0] !== ft[1]) {
+            winner = ft[0] > ft[1] ? t1 : t2;
+          }
+          // Match openfootball KO matches to our M73..M104 by team names
+          // We scan our KO match list to find the right match
+          if (winner) {
+            const allKO = [...R32, ...R16, ...QF, ...SF,
+                           {id:"M103"}, {id:"M104"}];
+            // Try to match by team names appearing in the KO slot
+            // Since slots use placeholder codes (1A, 2B etc), we match by round + teams
+            // The most reliable signal: if t1 and t2 are real team names (not codes)
+            if (!t1.match(/^[0-9W]/) && !t2.match(/^[0-9W]/)) {
+              // Both are real team names — find which KO match has these two teams
+              // by checking our resolved slots (already in preds via calcStandings)
+              // We store by looking for the match that has both team names as slots
+              // Simplest: match on round label
+              const roundMap = {
+                "round of 32":  R32,
+                "round of 16":  R16,
+                "quarter-final": QF,
+                "quarter-finals": QF,
+                "semi-final":   SF,
+                "semi-finals":  SF,
+                "third place":  [{id:"M103"}],
+                "third-place":  [{id:"M103"}],
+                "final":        [{id:"M104"}],
+              };
+              // Find round bucket
+              let bucket = null;
+              for (const [k, v] of Object.entries(roundMap)) {
+                if (round.includes(k)) { bucket = v; break; }
+              }
+              // Within bucket, check if we already have a result for any match
+              // and this one isn't it — just store all matches in the round
+              // For now store winner under a temp key; admin can review
+              // Better: match by date order within the round
+              // openfootball KO data will have W73/W74 as team names until groups finish
+              // So this branch only fires when real names are known
+              if (bucket) {
+                // Find first unfilled slot in this round
+                const unfilled = bucket.find(bm => !updates[bm.id] && !results[bm.id]);
+                if (unfilled) updates[unfilled.id] = winner;
+              }
+            }
+          }
         }
       });
 
-      // Batch-write new or changed results to Firebase
-      const existing = await fbGet("/results") || {};
+      // Only write changed values
       const toWrite = {};
       Object.entries(updates).forEach(([k, v]) => {
-        if (existing[k] !== v) toWrite[k] = v;
+        if (results[k] !== v) toWrite[k] = v;
       });
       if (Object.keys(toWrite).length > 0) {
-        await Promise.all(
-          Object.entries(toWrite).map(([k, v]) => fbSetResult(k, v))
-        );
+        await Promise.all(Object.entries(toWrite).map(([k, v]) => fbSetResult(k, v)));
         setResults(prev => ({...prev, ...toWrite}));
       }
       setLastSynced(new Date());
@@ -555,13 +593,12 @@ function App() {
     }
   };
 
-  // Auto-sync every 5 minutes when apiKey is set
+  // Auto-sync every 30 minutes (openfootball updates ~once a day, so no need to hammer it)
   useEffect(() => {
-    if (!apiKey) return;
-    syncLiveScores(apiKey);
-    const iv = setInterval(() => syncLiveScores(apiKey), 5 * 60 * 1000);
+    syncLiveScores();
+    const iv = setInterval(syncLiveScores, 30 * 60 * 1000);
     return () => clearInterval(iv);
-  }, [apiKey]);
+  }, []);
 
   const addPlayer = async () => {
     const n = newName.trim();
@@ -1637,11 +1674,11 @@ function App() {
 
       tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
 
-        // ── Admin + API Key header ─────────────────────────────────
+        // ── Admin + header ───────────────────────────────────────────
         e("div", {className: "flex items-start justify-between gap-4 mb-5 flex-wrap"},
           e("div", null,
             e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Actual Results"),
-            e("p", {className: "text-gray-500 text-sm"}, "Live scores auto-sync from wc2026api.com · Leaderboard updates instantly")
+            e("p", {className: "text-gray-500 text-sm"}, "Scores sync from openfootball (~daily) · admin can also enter manually")
           ),
           e("div", {className: "flex flex-col items-end gap-2"},
             e("button", {
@@ -1668,76 +1705,27 @@ function App() {
           )
         ),
 
-        // ── API Key setup (admin only) ─────────────────────────────
-        adminMode && e("div", {className: "bg-gradient-to-r from-blue-50 to-cyan-50 border-2 border-blue-200 rounded-2xl p-5 mb-5"},
-          e("div", {className: "flex items-center gap-2 mb-3"},
-            e("div", {className: "text-xl"}, "\u26A1"),
-            e("h3", {className: "font-black text-blue-900 text-base"}, "Live Score Auto-Sync"),
-            syncStatus === "syncing" && e("div", {className: "ml-2 w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"}),
-            syncStatus === "ok" && e("span", {className: "ml-2 text-xs font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full"}, "\u2713 Synced"),
-            syncStatus === "error" && e("span", {className: "ml-2 text-xs font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full"}, "\u26A0 Error"),
-            syncStatus === "no_key" && e("span", {className: "ml-2 text-xs font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded-full"}, "No API key")
+        // ── Sync status bar ──────────────────────────────────────────────────────
+        e("div", {className: "flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl p-3 mb-5 flex-wrap"},
+          e("div", {className: "flex items-center gap-2 flex-1"},
+            syncStatus === "syncing"
+              ? e("div", {className: "w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0"})
+              : syncStatus === "ok"
+              ? e("div", {className: "w-3 h-3 rounded-full bg-emerald-400 flex-shrink-0"})
+              : syncStatus === "error"
+              ? e("div", {className: "w-3 h-3 rounded-full bg-red-400 flex-shrink-0"})
+              : e("div", {className: "w-3 h-3 rounded-full bg-gray-300 flex-shrink-0"}),
+            e("span", {className: "text-sm font-semibold text-blue-800"},
+              syncStatus === "syncing" ? "Syncing scores\u2026" :
+              syncStatus === "ok" ? ("Synced \u2713" + (lastSynced ? " \u00b7 " + lastSynced.toLocaleTimeString() : "") + " \u00b7 openfootball updates ~daily") :
+              syncStatus === "error" ? "Sync failed \u2014 enter scores manually below" :
+              "Auto-syncs from openfootball on load \u00b7 ~24hr delay after matches"
+            )
           ),
-          apiKey
-            ? e("div", {className: "space-y-3"},
-                e("div", {className: "flex items-center gap-3 flex-wrap"},
-                  e("div", {className: "text-sm text-blue-800 font-semibold"},
-                    "\u2705 API key set. Auto-syncing every 5 minutes."),
-                  lastSynced && e("span", {className: "text-xs text-gray-500"},
-                    "Last synced: " + lastSynced.toLocaleTimeString()),
-                  e("button", {
-                    onClick: () => syncLiveScores(apiKey),
-                    className: "px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 transition"
-                  }, "\uD83D\uDD04 Sync now"),
-                  e("button", {
-                    onClick: async () => {
-                      setApiKey("");
-                      await fbSet("/apiKey", null);
-                      setSyncStatus(null);
-                    },
-                    className: "px-3 py-2 bg-red-100 text-red-600 rounded-lg text-xs font-bold hover:bg-red-200"
-                  }, "Remove key")
-                )
-              )
-            : e("div", {className: "space-y-3"},
-                e("p", {className: "text-sm text-blue-700"},
-                  "Get a free API key from ",
-                  e("a", {href:"https://www.wc2026api.com", target:"_blank", className:"font-bold underline"}, "wc2026api.com"),
-                  " (free tier = 100 req/day, more than enough). Once set, all completed match scores sync automatically."),
-                e("div", {className: "flex gap-2 flex-wrap"},
-                  e("input", {
-                    type: "text", value: apiKeyInput,
-                    onChange: ev => setApiKeyInput(ev.target.value),
-                    placeholder: "Paste your API key here (wc2026_xxxxx…)",
-                    className: "flex-1 min-w-0 px-3 py-2 border-2 border-blue-300 rounded-lg text-sm font-mono focus:outline-none focus:border-blue-600"
-                  }),
-                  e("button", {
-                    onClick: async () => {
-                      const k = apiKeyInput.trim();
-                      if (!k) return;
-                      setApiKey(k);
-                      setApiKeyInput("");
-                      await fbSet("/apiKey", k);
-                      syncLiveScores(k);
-                    },
-                    className: "px-5 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 transition whitespace-nowrap"
-                  }, "Save & Sync")
-                )
-              )
-        ),
-
-        // ── Sync status banner for non-admins ─────────────────────
-        !adminMode && e("div", {className: "flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl p-3 mb-4"},
-          apiKey
-            ? e("div", {className: "flex items-center gap-2 text-sm text-blue-700 font-semibold"},
-                e("div", {className: "w-2 h-2 rounded-full bg-emerald-400 animate-pulse"}),
-                "Live scores syncing automatically · ",
-                lastSynced
-                  ? "Last update: " + lastSynced.toLocaleTimeString()
-                  : "Waiting for next sync…"
-              )
-            : e("div", {className: "text-sm text-blue-700 font-semibold"},
-                "\uD83D\uDD12 Read-only · Admin has not configured auto-sync yet. Results will appear here once entered.")
+          e("button", {
+            onClick: syncLiveScores,
+            className: "text-xs font-bold px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex-shrink-0"
+          }, "\uD83D\uDD04 Sync now")
         ),
 
         livePreview,

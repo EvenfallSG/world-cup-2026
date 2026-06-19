@@ -54,6 +54,7 @@ button{transition:all .15s ease;}
 .bcentre-final{width:100%;}
 .bcentre-bronze{width:82%;margin-top:28px;margin-left:auto;margin-right:auto;opacity:0.9;}
 /* bracket flow connectors drawn by BracketLines SVG overlay */
+@keyframes tickerFade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
 </style>
 </head>
 <body>
@@ -449,6 +450,70 @@ function App() {
   // True once the current pid session has been unlocked for editing (or has no pin at all)
   const [editUnlocked, setEditUnlocked] = useState(true);
 
+  // ---- "What's new" notice on the login screen ----
+  // Bump this string whenever the notice content changes, so returning players see it again once.
+  const WHATS_NEW_VERSION = "2026-06-20-v1";
+  const [whatsNewDismissed, setWhatsNewDismissedState] = useState(() => {
+    try { return localStorage.getItem("wc26_whatsnew_dismissed") === WHATS_NEW_VERSION; }
+    catch { return false; }
+  });
+  const setWhatsNewDismissed = (val) => {
+    setWhatsNewDismissedState(val);
+    try { if (val) localStorage.setItem("wc26_whatsnew_dismissed", WHATS_NEW_VERSION); } catch {}
+  };
+
+  // Pure helper — no dependency on component state — hoisted up here since the ticker
+  // useMemo below needs it, and useMemo/useState must run before any early return.
+  const fmtKO = (ms) => new Date(ms).toLocaleString(undefined, {weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit"});
+
+  // ---- TICKER TAPE hooks ----
+  // These must live before any early `return` below (loading/live/setup/login/mode-choice screens
+  // each return early) so the hook count stays identical on every render — calling hooks after an
+  // early return is what crashes React with "Rendered more hooks than during the previous render."
+  const [tickerIdx, setTickerIdx] = useState(0);
+  const [tickerHidden, setTickerHidden] = useState(false);
+  const tickerItems = useMemo(() => {
+    if (!started) return [];
+    const items = [];
+
+    // Most recent group result with a kickoff time (so we can find the latest chronologically)
+    const playedGroup = GM.filter(m => results[m.id] && KICKOFF[m.id]);
+    if (playedGroup.length) {
+      const latest = playedGroup.slice().sort((a, b) => KICKOFF[b.id] - KICKOFF[a.id])[0];
+      items.push({icon: "\uD83C\uDFC1", text: latest.t1 + " " + results[latest.id].replace("-", " - ") + " " + latest.t2 + " \u00b7 Full Time"});
+    }
+
+    // Next upcoming kickoff (group stage)
+    const upcoming = GM.filter(m => KICKOFF[m.id] && KICKOFF[m.id] > nowTick).sort((a, b) => KICKOFF[a.id] - KICKOFF[b.id])[0];
+    if (upcoming) {
+      items.push({icon: "\u23F1", text: "Next: " + upcoming.t1 + " vs " + upcoming.t2 + " \u00b7 " + fmtKO(KICKOFF[upcoming.id])});
+    }
+
+    // Leaderboard leaders, split by mode (only once at least one player has scored)
+    if (players.length) {
+      const scored = calcAllScores(players, preds, results);
+      const fullBoard  = scored.filter(p => effectiveMode(p.id, preds) !== "quick" && effectiveMode(p.id, preds) !== null);
+      const quickBoard = scored.filter(p => effectiveMode(p.id, preds) === "quick");
+      if (fullBoard.length && fullBoard[0].total > 0) {
+        items.push({icon: "\uD83D\uDC51", text: "Leading Full Bracket: " + fullBoard[0].name + " \u2014 " + fullBoard[0].total + " pts"});
+        if (fullBoard.length > 1 && (fullBoard[0].total - fullBoard[1].total) <= 3) {
+          items.push({icon: "\uD83D\uDD25", text: "Tight race: " + fullBoard[0].name + " & " + fullBoard[1].name + " separated by " + (fullBoard[0].total - fullBoard[1].total) + " pt" + ((fullBoard[0].total - fullBoard[1].total) === 1 ? "" : "s")});
+        }
+      }
+      if (quickBoard.length && quickBoard[0].total > 0) {
+        items.push({icon: "\u26A1", text: "Leading Quick Picks: " + quickBoard[0].name + " \u2014 " + quickBoard[0].total + " pts"});
+      }
+    }
+
+    if (!items.length) items.push({icon: "\uD83D\uDCE3", text: "Tournament underway \u2014 check back once results start rolling in!"});
+    return items;
+  }, [started, results, players, preds, nowTick]);
+  useEffect(() => {
+    if (tickerItems.length <= 1) return;
+    const iv = setInterval(() => setTickerIdx(i => (i + 1) % tickerItems.length), 5000);
+    return () => clearInterval(iv);
+  }, [tickerItems.length]);
+
   const persist = (key, val) => {
     setSaveStatus("saving");
     fbSetKey(key, val).then(ok => {
@@ -733,7 +798,6 @@ function App() {
     return false;
   };
   const bracketLocked = nowTick >= KNOCKOUT_LOCK;
-  const fmtKO = (ms) => new Date(ms).toLocaleString(undefined, {weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit"});
 
   const setPred = (mid, val) => {
     if (isRO || !pid || isLockedKey(mid)) return;
@@ -1031,6 +1095,20 @@ function App() {
     mainView = e("div", {className: "wc-card rounded-2xl p-8 shadow-2xl max-w-lg mx-auto"},
       e("h2", {className: "text-2xl font-bold text-blue-900 mb-1 text-center"}, "Who are you?"),
       e("p", {className: "text-gray-500 text-sm text-center mb-6"}, "Select your name to enter your picks"),
+
+      !whatsNewDismissed && e("div", {className: "mb-5 rounded-xl border border-blue-200 bg-blue-50 p-3.5"},
+        e("div", {className: "flex items-start justify-between gap-2 mb-1.5"},
+          e("span", {className: "text-xs font-extrabold text-blue-700 uppercase tracking-wider"}, "\u2728 What's new"),
+          e("button", {onClick: () => setWhatsNewDismissed(true), className: "text-blue-400 hover:text-blue-700 text-xs font-bold leading-none"}, "\u2715")
+        ),
+        e("ul", {className: "text-xs text-blue-800 space-y-1 list-disc pl-4"},
+          e("li", null, "Joining is open the whole group stage now \u2014 jump in anytime before the knockouts start"),
+          e("li", null, "You can set a 3-digit PIN to stop others accidentally changing your picks"),
+          e("li", null, "Viewing a friend's picks is easier on mobile \u2014 a clear banner shows whose picks you're looking at"),
+          e("li", null, "The leaderboard now shows Full Bracket and Quick Picks players separately"),
+          e("li", null, "A ticker at the bottom shows the latest results and leaderboard movement")
+        )
+      ),
 
       // Search / join input — dual purpose
       e("div", {className: "relative mb-5"},
@@ -2160,7 +2238,40 @@ function App() {
     )
   );
 
-  return e("div", {className: "min-h-screen wc-bg p-4 md:p-6"},
+  // ---- TICKER TAPE render data ----
+  // (The hooks that produce tickerItems/tickerIdx/tickerHidden live near the top of App(),
+  //  before any early return — see above. Only plain derived values are computed here.)
+  // Clamp index if the item list shrinks (e.g. fewer items after a state change)
+  const safeTickerIdx = tickerItems.length ? tickerIdx % tickerItems.length : 0;
+
+  const tickerBar = started && !live && !tickerHidden && tickerItems.length > 0 && e("div", {
+    className: "fixed bottom-0 left-0 right-0 z-40 bg-gradient-to-r from-blue-950 via-blue-900 to-teal-900 border-t border-amber-400/30 shadow-[0_-4px_20px_rgba(0,0,0,0.3)]"
+  },
+    e("div", {className: "max-w-7xl mx-auto px-4 py-2 flex items-center gap-3"},
+      e("div", {className: "flex-1 min-w-0 overflow-hidden"},
+        e("div", {
+          key: safeTickerIdx, // forces remount -> CSS animation replays on each rotation
+          className: "flex items-center gap-2 animate-[tickerFade_0.4s_ease]"
+        },
+          e("span", {className: "text-base flex-shrink-0"}, tickerItems[safeTickerIdx].icon),
+          e("span", {className: "text-white text-xs md:text-sm font-semibold truncate"}, tickerItems[safeTickerIdx].text)
+        )
+      ),
+      tickerItems.length > 1 && e("div", {className: "hidden sm:flex items-center gap-1 flex-shrink-0"},
+        tickerItems.map((_, i) => e("span", {
+          key: i,
+          className: "w-1.5 h-1.5 rounded-full transition " + (i === safeTickerIdx ? "bg-amber-400" : "bg-white/25")
+        }))
+      ),
+      e("button", {
+        onClick: () => setTickerHidden(true),
+        className: "text-white/50 hover:text-white/90 text-xs font-bold flex-shrink-0 px-1",
+        title: "Hide ticker"
+      }, "\u2715")
+    )
+  );
+
+  return e("div", {className: "min-h-screen wc-bg p-4 md:p-6" + (tickerBar ? " pb-14" : "")},
     e("div", {className: "max-w-7xl mx-auto"},
       e("div", {className: "text-center mb-6"},
         e("h1", {className: "wc-title text-5xl md:text-6xl text-white"}, "FIFA WORLD CUP 2026"),
@@ -2169,8 +2280,9 @@ function App() {
       mainView
     ),
     pinModal,
+    tickerBar,
     saveStatus && e("div", {
-      className: "fixed bottom-4 right-4 z-50 px-4 py-2 rounded-full text-sm font-bold shadow-2xl flex items-center gap-2 " + (
+      className: "fixed " + (tickerBar ? "bottom-14" : "bottom-4") + " right-4 z-50 px-4 py-2 rounded-full text-sm font-bold shadow-2xl flex items-center gap-2 " + (
         saveStatus === "saving" ? "bg-blue-600 text-white" :
         saveStatus === "saved" ? "bg-emerald-600 text-white" :
         "bg-red-600 text-white"

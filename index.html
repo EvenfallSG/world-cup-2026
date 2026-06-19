@@ -105,29 +105,34 @@ function calcPlayerScore(pid, preds, results, players) {
   // results: { [matchId]: "2-1" or teamName for KO, GOLDEN_BOOT, MVP, QP_WIN/RUN/3RD/4TH }
   let total = 0;
   const breakdown = { groupExact:0, groupOutcome:0, koCorrect:0, qpPoints:0, awardPoints:0 };
+  const myMode = effectiveMode(pid, preds);
 
-  // Group matches
-  GM.forEach(m => {
-    const actual = results[m.id];
-    const pred   = preds[pid + "-" + m.id];
-    if (!actual || !pred) return;
-    if (actual === pred) { total += SCORE_EXACT; breakdown.groupExact += SCORE_EXACT; return; }
-    if (getOutcome(actual) && getOutcome(actual) === getOutcome(pred)) {
-      total += SCORE_OUTCOME; breakdown.groupOutcome += SCORE_OUTCOME;
-    }
-  });
+  // Group matches & knockout match-winner picks only ever count for Full Bracket players.
+  // Quick Pick players never entered these, but score them defensively only when in full mode
+  // so a stray/leftover key under their pid can never sneak in extra points outside their 6 picks.
+  if (myMode === "full") {
+    GM.forEach(m => {
+      const actual = results[m.id];
+      const pred   = preds[pid + "-" + m.id];
+      if (!actual || !pred) return;
+      if (actual === pred) { total += SCORE_EXACT; breakdown.groupExact += SCORE_EXACT; return; }
+      if (getOutcome(actual) && getOutcome(actual) === getOutcome(pred)) {
+        total += SCORE_OUTCOME; breakdown.groupOutcome += SCORE_OUTCOME;
+      }
+    });
 
-  // Knockout matches (M73–M104): result stored as winning team name
-  const KO_IDS = [...R32, ...R16, ...QF, ...SF, {id:"M103"}, {id:"M104"}].map(m => m.id);
-  KO_IDS.forEach(mid => {
-    const actual = results[mid];
-    const pred   = preds[pid + "-" + mid];
-    if (!actual || !pred) return;
-    if (actual === pred) { total += SCORE_KO; breakdown.koCorrect += SCORE_KO; }
-  });
+    // Knockout matches (M73–M104): result stored as winning team name
+    const KO_IDS = [...R32, ...R16, ...QF, ...SF, {id:"M103"}, {id:"M104"}].map(m => m.id);
+    KO_IDS.forEach(mid => {
+      const actual = results[mid];
+      const pred   = preds[pid + "-" + mid];
+      if (!actual || !pred) return;
+      if (actual === pred) { total += SCORE_KO; breakdown.koCorrect += SCORE_KO; }
+    });
+  }
 
-  // Quick picks + awards
-  const myMode = preds[pid + "-MODE"];
+  // Quick picks + awards — the only category that ever counts for Quick Pick players,
+  // and the only thing that resolves once finals/awards are decided.
   const qpKeys = Object.keys(SCORE_QP);
   qpKeys.forEach(key => {
     const actual = results[key]; // e.g. results["QP_WIN"] = "Brazil"
@@ -244,6 +249,20 @@ const GM = [
   {id:"L3",t1:"England",t2:"Panama",g:"L"},{id:"L4",t1:"Croatia",t2:"Ghana",g:"L"},
   {id:"L5",t1:"England",t2:"Ghana",g:"L"},{id:"L6",t1:"Panama",t2:"Croatia",g:"L"}
 ];
+
+// A player's stored MODE flag can go stale (e.g. someone tried Quick Picks first via the
+// CBF button, then went back and filled in a full bracket without ever flipping the flag).
+// So mode is re-derived from what they've actually filled in: a meaningful number of group
+// score predictions means they're playing Full Bracket, full stop, regardless of the stored flag.
+const FULL_MODE_THRESHOLD = 10; // a handful of group scores is enough to call it "playing full bracket"
+function effectiveMode(pid, preds) {
+  const groupPicksMade = GM.filter(m => {
+    const v = preds[pid + "-" + m.id];
+    return v && /^\d+-\d+$/.test(v);
+  }).length;
+  if (groupPicksMade >= FULL_MODE_THRESHOLD) return "full";
+  return preds[pid + "-MODE"] === "quick" ? "quick" : (preds[pid + "-MODE"] || null);
+}
 
 // ---- OFFICIAL KICKOFF TIMES (stored in UTC, displayed in each viewer's local time) ----
 // Compiled June 2026 from the official FIFA schedule (via ESPN / CBS / Sky Sports post-playoff listings).
@@ -420,6 +439,16 @@ function App() {
   const recentEdits = useRef({});
   const saveTimer = useRef(null);
 
+  // ---- PIN protection state ----
+  // pinStage: null | {id,name,mode} where mode = "enter" (ask for existing pin)
+  //           | "setRequired" (new/empty player, must set before continuing)
+  //           | "setOptional" (existing player with picks, can skip -> read-only)
+  const [pinStage, setPinStage] = useState(null);
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState("");
+  // True once the current pid session has been unlocked for editing (or has no pin at all)
+  const [editUnlocked, setEditUnlocked] = useState(true);
+
   const persist = (key, val) => {
     setSaveStatus("saving");
     fbSetKey(key, val).then(ok => {
@@ -429,9 +458,11 @@ function App() {
     });
   };
 
-  const regOpen = () => new Date() < new Date(2026, 5, 18);
+  // Registration stays open through the entire group stage — late joiners can still
+  // jump in with Quick Picks or a partial bracket even if they can't catch the max score.
+  const regOpen = () => nowTick < KNOCKOUT_LOCK;
   const activeId = viewId || pid;
-  const isRO = !!(viewId && viewId !== pid);
+  const isRO = !!(viewId && viewId !== pid) || (!!pid && !viewId && !editUnlocked);
 
   useEffect(() => {
     const load = async () => {
@@ -600,16 +631,29 @@ function App() {
     return () => clearInterval(iv);
   }, []);
 
-  const addPlayer = async () => {
+  // playerHasPicks: true if this player has made ANY prediction yet (used to decide
+  // whether a pin-less player is treated as "new" (must set pin) or "existing" (can skip, read-only).
+  const playerHasPicks = (id) => Object.keys(preds).some(k => k.startsWith(id + "-"));
+
+  const addPlayer = async (pin) => {
     const n = newName.trim();
     if (!n) return;
-    const p = {id: Date.now().toString(), name: n};
+    const p = {id: Date.now().toString(), name: n, pin: pin || ""};
     const up = [...players, p];
     setPlayers(up);
     const m = {};
     up.forEach(x => { m[x.id] = x; });
     await fbSet("/players", m);
     setNewName("");
+    return p;
+  };
+
+  const setPlayerPin = async (id, pin) => {
+    const up = players.map(p => p.id === id ? {...p, pin} : p);
+    setPlayers(up);
+    const m = {};
+    up.forEach(x => { m[x.id] = x; });
+    await fbSet("/players", m);
   };
 
   const remPlayer = async (id) => {
@@ -627,8 +671,59 @@ function App() {
     setTab("login");
   };
 
-  const login = (id, name) => { setPid(id); setPname(name); setTab("group"); };
-  const logout = () => { setPid(null); setPname(""); setViewId(null); setTab("login"); };
+  // Clicking a name in the login grid routes through the pin gate rather than logging in directly.
+  const requestLogin = (id, name) => {
+    const player = players.find(p => p.id === id);
+    const pin = player && player.pin;
+    if (pin) {
+      setPinInput(""); setPinError("");
+      setPinStage({id, name, mode: "enter"});
+    } else if (playerHasPicks(id)) {
+      // Existing player, picks already in, never set a pin — prompt but allow skip (read-only).
+      setPinInput(""); setPinError("");
+      setPinStage({id, name, mode: "setOptional"});
+    } else {
+      // Brand-new / untouched player — must set a pin before they can start picking.
+      setPinInput(""); setPinError("");
+      setPinStage({id, name, mode: "setRequired"});
+    }
+  };
+
+  const login = (id, name, unlocked) => {
+    setPid(id); setPname(name); setTab("group"); setEditUnlocked(unlocked !== false);
+  };
+
+  const confirmPinEntry = () => {
+    const player = players.find(p => p.id === pinStage.id);
+    if (player && player.pin === pinInput.trim()) {
+      login(pinStage.id, pinStage.name, true);
+      setPinStage(null);
+    } else {
+      setPinError("Wrong PIN. You can view read-only, or try again.");
+    }
+  };
+
+  const viewReadOnlyInsteadOfPin = () => {
+    // Wrong/forgotten pin -> log in as themselves but locked to read-only (same as viewing as someone else,
+    // minus the "viewing X" banner since it IS their own name).
+    login(pinStage.id, pinStage.name, false);
+    setPinStage(null);
+  };
+
+  const confirmSetPin = async (skip) => {
+    if (skip) {
+      // Optional flow only: log in read-only, no pin set yet.
+      login(pinStage.id, pinStage.name, false);
+      setPinStage(null);
+      return;
+    }
+    const clean = pinInput.trim();
+    if (!/^\d{3}$/.test(clean)) { setPinError("Enter exactly 3 digits."); return; }
+    await setPlayerPin(pinStage.id, clean);
+    login(pinStage.id, pinStage.name, true);
+    setPinStage(null);
+  };
+  const logout = () => { setPid(null); setPname(""); setViewId(null); setTab("login"); setEditUnlocked(true); setPinStage(null); };
 
   // ---- Kickoff locking ----
   const isLockedKey = (mid) => {
@@ -669,7 +764,7 @@ function App() {
   const switchView = (id) => {
     if (!id || id === pid) { setViewId(null); return; }
     setViewId(id);
-    const m = preds[id + "-MODE"];
+    const m = effectiveMode(id, preds);
     if (m === "quick") setTab("quick");
     else if (tab === "quick") setTab("bracket");
   };
@@ -785,6 +880,73 @@ function App() {
     const medals = ["\uD83E\uDD47","\uD83E\uDD48","\uD83E\uDD49"];
     const rankBg = ["bg-yellow-50","bg-gray-100","bg-orange-50"];
 
+    // Split by mode — comparing a Quick Pick's lower max ceiling against a Full Bracket
+    // player's much larger one on one combined table isn't a fair ranking, so two boards.
+    const fullPlayers  = scored.filter(p => effectiveMode(p.id, preds) !== "quick");
+    const quickPlayers = scored.filter(p => effectiveMode(p.id, preds) === "quick");
+
+    const board = (title, icon, list, accent) => e("div", {className: "mb-10"},
+      e("div", {className: "flex items-center gap-3 mb-3 px-1"},
+        e("span", {className: "text-2xl"}, icon),
+        e("h2", {className: "text-white font-bold text-xl tracking-wide"}, title),
+        e("span", {className: "text-white/50 text-sm font-semibold"}, "(" + list.length + " player" + (list.length !== 1 ? "s" : "") + ")")
+      ),
+      list.length === 0
+        ? e("div", {className: "bg-white/10 rounded-2xl p-6 text-center text-white/60 text-sm font-semibold"}, "No players in this mode yet")
+        : e("div", {className: "bg-white rounded-3xl shadow-2xl overflow-hidden"},
+            e("table", {className: "w-full border-collapse"},
+              e("thead", null,
+                e("tr", {className: "bg-gradient-to-r " + accent},
+                  e("th", {className: "py-4 px-4 text-white font-black text-xl text-left w-16"}, "#"),
+                  e("th", {className: "py-4 px-4 text-white font-black text-xl text-left"}, "Player"),
+                  e("th", {className: "py-4 px-4 text-amber-300 font-black text-2xl text-right"}, "Pts"),
+                  e("th", {className: "py-4 px-4 text-blue-200 font-bold text-sm text-right hidden md:table-cell"}, "Exact"),
+                  e("th", {className: "py-4 px-4 text-blue-200 font-bold text-sm text-right hidden md:table-cell"}, "Result"),
+                  e("th", {className: "py-4 px-4 text-blue-200 font-bold text-sm text-right hidden md:table-cell"}, "KO"),
+                  e("th", {className: "py-4 px-4 text-blue-200 font-bold text-sm text-right hidden md:table-cell"}, "Awards")
+                )
+              ),
+              e("tbody", null,
+                list.map((p, i) => {
+                  const isTop3 = i < 3;
+                  const isMe = p.id === pid;
+                  const goToPicks = () => {
+                    if (!pid) return; // not logged in — nothing sensible to jump to
+                    switchView(p.id);
+                    setLive(false);
+                  };
+                  return e("tr", {key: p.id,
+                    className: "border-b-2 border-gray-100 transition hover:bg-blue-50 " + (rankBg[i] || "")},
+                    e("td", {className: "px-4 py-5 text-3xl font-black text-blue-900 text-center"},
+                      isTop3 ? medals[i] : e("span", {className: "text-2xl text-gray-400"}, i + 1)),
+                    e("td", {className: "px-4 py-5"},
+                      pid
+                        ? e("button", {
+                            onClick: goToPicks,
+                            className: "text-2xl font-bold text-blue-900 hover:text-blue-600 hover:underline text-left",
+                            title: isMe ? "View my picks" : "View " + p.name + "'s picks (read-only)"
+                          }, p.name + (isMe ? " (you)" : ""))
+                        : e("span", {className: "text-2xl font-bold text-blue-900"}, p.name),
+                      !hasResults && e("div", {className: "text-xs text-gray-400 mt-0.5"}, "Waiting for first results…")
+                    ),
+                    e("td", {className: "px-4 py-5 text-right"},
+                      e("span", {className: "text-3xl font-black text-blue-900"}, hasResults ? p.total : "–")
+                    ),
+                    e("td", {className: "px-4 py-5 text-right text-lg font-bold text-emerald-600 hidden md:table-cell"},
+                      hasResults ? (p.breakdown.groupExact > 0 ? "+" + p.breakdown.groupExact : "–") : "–"),
+                    e("td", {className: "px-4 py-5 text-right text-lg font-bold text-blue-500 hidden md:table-cell"},
+                      hasResults ? (p.breakdown.groupOutcome > 0 ? "+" + p.breakdown.groupOutcome : "–") : "–"),
+                    e("td", {className: "px-4 py-5 text-right text-lg font-bold text-purple-600 hidden md:table-cell"},
+                      hasResults ? (p.breakdown.koCorrect > 0 ? "+" + p.breakdown.koCorrect : "–") : "–"),
+                    e("td", {className: "px-4 py-5 text-right text-lg font-bold text-pink-600 hidden md:table-cell"},
+                      hasResults ? ((p.breakdown.qpPoints + p.breakdown.awardPoints) > 0 ? "+" + (p.breakdown.qpPoints + p.breakdown.awardPoints) : "–") : "–")
+                  );
+                })
+              )
+            )
+          )
+    );
+
     return e("div", {className: "min-h-screen wc-bg p-6 md:p-10"},
       e("div", {className: "max-w-5xl mx-auto"},
         // Header
@@ -814,58 +976,14 @@ function App() {
           )
         ),
 
-        // Leaderboard table
-        e("div", {className: "bg-white rounded-3xl shadow-2xl overflow-hidden"},
-          e("table", {className: "w-full border-collapse"},
-            e("thead", null,
-              e("tr", {className: "bg-gradient-to-r from-blue-900 to-teal-800"},
-                e("th", {className: "py-4 px-4 text-white font-black text-xl text-left w-16"}, "#"),
-                e("th", {className: "py-4 px-4 text-white font-black text-xl text-left"}, "Player"),
-                e("th", {className: "py-4 px-4 text-amber-300 font-black text-2xl text-right"}, "Pts"),
-                e("th", {className: "py-4 px-4 text-blue-200 font-bold text-sm text-right hidden md:table-cell"}, "Exact"),
-                e("th", {className: "py-4 px-4 text-blue-200 font-bold text-sm text-right hidden md:table-cell"}, "Result"),
-                e("th", {className: "py-4 px-4 text-blue-200 font-bold text-sm text-right hidden md:table-cell"}, "KO"),
-                e("th", {className: "py-4 px-4 text-blue-200 font-bold text-sm text-right hidden md:table-cell"}, "Awards")
-              )
-            ),
-            e("tbody", null,
-              scored.map((p, i) => {
-                const isTop3 = i < 3;
-                const mode = preds[p.id + "-MODE"] === "quick" ? "QP" : "Full";
-                return e("tr", {key: p.id,
-                  className: "border-b-2 border-gray-100 transition hover:bg-blue-50 " + (rankBg[i] || "")},
-                  e("td", {className: "px-4 py-5 text-3xl font-black text-blue-900 text-center"},
-                    isTop3 ? medals[i] : e("span", {className: "text-2xl text-gray-400"}, i + 1)),
-                  e("td", {className: "px-4 py-5"},
-                    e("div", {className: "flex items-center gap-2"},
-                      e("span", {className: "text-2xl font-bold text-blue-900"}, p.name),
-                      e("span", {className: "text-xs px-2 py-0.5 rounded-full font-bold " +
-                        (mode === "QP" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700")}, mode)
-                    ),
-                    !hasResults && e("div", {className: "text-xs text-gray-400 mt-0.5"}, "Waiting for first results…")
-                  ),
-                  e("td", {className: "px-4 py-5 text-right"},
-                    e("span", {className: "text-3xl font-black text-blue-900"}, hasResults ? p.total : "–")
-                  ),
-                  e("td", {className: "px-4 py-5 text-right text-lg font-bold text-emerald-600 hidden md:table-cell"},
-                    hasResults ? (p.breakdown.groupExact > 0 ? "+" + p.breakdown.groupExact : "–") : "–"),
-                  e("td", {className: "px-4 py-5 text-right text-lg font-bold text-blue-500 hidden md:table-cell"},
-                    hasResults ? (p.breakdown.groupOutcome > 0 ? "+" + p.breakdown.groupOutcome : "–") : "–"),
-                  e("td", {className: "px-4 py-5 text-right text-lg font-bold text-purple-600 hidden md:table-cell"},
-                    hasResults ? (p.breakdown.koCorrect > 0 ? "+" + p.breakdown.koCorrect : "–") : "–"),
-                  e("td", {className: "px-4 py-5 text-right text-lg font-bold text-pink-600 hidden md:table-cell"},
-                    hasResults ? ((p.breakdown.qpPoints + p.breakdown.awardPoints) > 0 ? "+" + (p.breakdown.qpPoints + p.breakdown.awardPoints) : "–") : "–")
-                );
-              })
-            )
-          )
-        ),
+        board("Full Bracket", "\uD83C\uDFC6", fullPlayers, "from-blue-900 to-teal-800"),
+        board("Quick Picks", "\u26A1", quickPlayers, "from-amber-600 to-orange-700"),
 
         // Matches played counter
         hasResults && (() => {
           const played = GM.filter(m => results[m.id]).length;
           const koPlayed = [...R32,...R16,...QF,...SF,{id:"M103"},{id:"M104"}].filter(m => results[m.id]).length;
-          return e("div", {className: "mt-4 text-center text-white/60 text-sm font-semibold"},
+          return e("div", {className: "mt-2 text-center text-white/60 text-sm font-semibold"},
             played + " group matches + " + koPlayed + " knockout matches with results entered"
           );
         })()
@@ -919,7 +1037,12 @@ function App() {
         e("input", {
           type: "text", value: newName,
           onChange: ev => setNewName(ev.target.value),
-          onKeyPress: ev => { if (ev.key === "Enter" && regOpen()) addPlayer(); },
+          onKeyPress: async ev => {
+            if (ev.key === "Enter" && regOpen() && newName.trim() && !players.find(p => p.name.toLowerCase() === newName.trim().toLowerCase())) {
+              const p = await addPlayer();
+              if (p) requestLogin(p.id, p.name);
+            }
+          },
           placeholder: regOpen() ? "Search players or type your name to join…" : "Search players…",
           className: "w-full pl-10 pr-4 py-3 border-2 border-blue-200 rounded-xl text-sm focus:outline-none focus:border-blue-500 bg-white"
         }),
@@ -932,16 +1055,17 @@ function App() {
           ? filtered.map(p =>
               e("button", {
                 key: p.id,
-                onClick: () => { setNewName(""); login(p.id, p.name); },
+                onClick: () => { setNewName(""); requestLogin(p.id, p.name); },
                 className: "flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 border-blue-100 bg-white hover:border-blue-500 hover:bg-blue-50 hover:shadow-md transition text-left group"
               },
                 e("span", {className: "w-7 h-7 rounded-full bg-blue-100 group-hover:bg-blue-500 flex items-center justify-center text-xs font-black text-blue-700 group-hover:text-white flex-shrink-0 transition"},
                   p.name.charAt(0).toUpperCase()),
-                e("span", {className: "text-sm font-semibold text-blue-900 truncate"}, p.name)
+                e("span", {className: "text-sm font-semibold text-blue-900 truncate"}, p.name),
+                p.pin && e("span", {className: "text-[11px] ml-auto opacity-50 flex-shrink-0"}, "\uD83D\uDD12")
               )
             )
           : e("div", {className: "col-span-3 text-center py-4 text-sm text-gray-400 italic"},
-              newName.trim() ? "No player found \u2014 " + (regOpen() ? "press Enter to join as \"" + newName.trim() + "\"" : "registration is closed") : "No players yet"
+              newName.trim() ? "No player found \u2014 " + (regOpen() ? "press Enter to join as \"" + newName.trim() + "\"" : "joining is closed, knockouts have started") : "No players yet"
             )
       ),
 
@@ -949,7 +1073,7 @@ function App() {
       regOpen() && newName.trim() && !players.find(p => p.name.toLowerCase() === newName.trim().toLowerCase()) &&
         e("div", {className: "mb-4"},
           e("button", {
-            onClick: addPlayer,
+            onClick: async () => { const p = await addPlayer(); if (p) requestLogin(p.id, p.name); },
             className: "w-full py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-bold text-sm hover:shadow-lg transition flex items-center justify-center gap-2"
           },
             e("span", null, "+"),
@@ -960,8 +1084,8 @@ function App() {
       e("div", {className: "flex items-center justify-between text-xs text-gray-400 border-t border-gray-100 pt-4"},
         e("span", null, players.length + " player" + (players.length !== 1 ? "s" : "") + " registered"),
         regOpen()
-          ? e("span", {className: "text-amber-600 font-semibold"}, "Registration closes June 18")
-          : e("span", {className: "text-red-400 font-semibold"}, "Registration closed")
+          ? e("span", {className: "text-amber-600 font-semibold"}, "Joining open until knockouts begin (" + fmtKO(KNOCKOUT_LOCK) + ")")
+          : e("span", {className: "text-red-400 font-semibold"}, "Joining closed \u2014 knockout stage underway")
       )
     );
   } else {
@@ -1447,7 +1571,68 @@ function App() {
               )
             );
           };
-          return e(BracketWrap, {key:"bwrap"});
+
+          // ---- MOBILE: simple stacked list, no horizontal scrolling needed ----
+          // Same renderBMatch cards, just laid out vertically round-by-round with jump links.
+          const MOBILE_ROUNDS = [
+            {key:"r32", label:"Round of 32", render:() => [...P1_R32, ...P2_R32].map(id=>r32m(id))},
+            {key:"r16", label:"Round of 16", render:() => [...P1_R16, ...P2_R16].map(id=>kom(R16,id))},
+            {key:"qf",  label:"Quarter Finals", render:() => [...P1_QF, ...P2_QF].map(id=>kom(QF,id))},
+            {key:"sf",  label:"Semi Finals", render:() => [kom(SF,"M101"), kom(SF,"M102")]},
+            {key:"podium", label:"Bronze, Final & Podium", render:() => {
+              const finalT1 = gKO("M101"), finalT2 = gKO("M102");
+              const champ   = gKO("M104");
+              const runner  = (champ&&finalT1&&finalT2) ? (champ===finalT1?finalT2:finalT1) : null;
+              const third   = gKO("M103");
+              return [
+                e("div",{key:"bronze-m", className:"mb-3"},
+                  e("div",{className:"text-center text-[10px] font-extrabold text-amber-800 bg-orange-100 rounded-md py-1 mb-2"}, "BRONZE \u00B7 Jul 18"),
+                  renderBMatch({mid:"M103",t1:sfLoser("M101"),t2:sfLoser("M102"),date:"Jul 18",label:"M103",waitingOn:"M101 & M102"})
+                ),
+                e("div",{key:"final-m", className:"mb-3"},
+                  e("div",{className:"text-center text-[11px] font-extrabold text-white bg-gradient-to-r from-amber-500 to-orange-600 rounded-md py-1.5 mb-2"}, "\uD83C\uDFC6 FINAL \u00B7 Jul 19"),
+                  renderFinalMatch({mid:"M104",t1:finalT1,t2:finalT2})
+                ),
+                e("div",{key:"podium-m", className:"rounded-xl p-3", style:{border:"2px solid #f59e0b", background:"linear-gradient(145deg,#fffbeb,#fef3c7)"}},
+                  e("div",{className:"text-center text-[11px] font-extrabold text-amber-800 mb-2"}, "\uD83C\uDFC6 PODIUM"),
+                  [["\uD83E\uDD47","Champion",champ],["\uD83E\uDD48","Runner-up",runner],["\uD83E\uDD49","3rd Place",third]].map(([medal,label,team]) =>
+                    e("div",{key:label, className:"flex items-center gap-2 py-1"},
+                      e("span",{className:"text-base"}, medal),
+                      e("span",{className:"text-[10px] font-bold text-amber-700 w-20 flex-shrink-0"}, label),
+                      e("span",{className:"text-sm font-bold " + (team?"text-blue-900":"text-gray-400 italic")}, team ? getFlag(team)+"\u00A0"+team : "TBD")
+                    )
+                  ),
+                  e("div",{className:"border-t border-dashed border-amber-400 my-2"}),
+                  [["\u26BD","Golden Boot",getPred("GOLDEN_BOOT")],["\u2B50","MVP",getPred("MVP")]].map(([icon,label,val]) =>
+                    e("div",{key:label, className:"flex justify-between py-0.5"},
+                      e("span",{className:"text-[10px] font-bold text-amber-700"}, icon+" "+label),
+                      e("span",{className:"text-[11px] font-bold " + (val?"text-blue-900":"text-gray-400 italic")}, val||"TBD")
+                    )
+                  )
+                )
+              ];
+            }}
+          ];
+
+          const MobileBracket = () => {
+            const [activeRound, setActiveRound] = useState("r32");
+            const current = MOBILE_ROUNDS.find(r => r.key === activeRound) || MOBILE_ROUNDS[0];
+            return e("div", {className:"md:hidden"},
+              e("div", {className:"flex gap-1.5 mb-4 overflow-x-auto pb-1", style:{scrollbarWidth:"none"}},
+                MOBILE_ROUNDS.map(r => e("button", {
+                  key:r.key, onClick:()=>setActiveRound(r.key),
+                  className:"flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition " +
+                    (activeRound===r.key ? "bg-blue-600 text-white shadow" : "bg-blue-50 text-blue-700")
+                }, r.label))
+              ),
+              e("div", {className:"space-y-2"}, current.render())
+            );
+          };
+
+          return e("div", null,
+            e("div", {className:"hidden md:block"}, e(BracketWrap, {key:"bwrap"})),
+            e(MobileBracket, {key:"mbracket"})
+          );
         })()
       );
     }
@@ -1767,7 +1952,7 @@ function App() {
       const bracketDone = KO_IDS.filter(id => resolveKO(id)).length;
       const quickKeys = ["QP_WIN", "QP_RUN", "QP_3RD", "QP_4TH", "GOLDEN_BOOT", "MVP"];
       const quickDone = quickKeys.filter(k => ((preds[activeId + "-" + k]) || "").trim()).length;
-      const myMode = preds[pid + "-MODE"];
+      const myMode = effectiveMode(pid, preds);
       const chip = (label, done, total, t) => e("button", {
         key: t, onClick: () => setTab(t),
         className: "flex-1 min-w-[110px] text-left px-3 py-2 rounded-xl transition border " +
@@ -1794,13 +1979,20 @@ function App() {
       e("select", {
         value: viewId || "",
         onChange: ev => switchView(ev.target.value || null),
-        className: "w-full px-3 py-3 rounded-xl border-0 text-sm font-semibold bg-white/95 text-blue-900 shadow-lg"
+        className: "w-full px-3 py-3 rounded-xl border-0 text-sm font-semibold shadow-lg " +
+          (viewId ? "bg-blue-600 text-white" : "bg-white/95 text-blue-900")
       },
         e("option", {value: ""}, "My picks (" + pname + ")"),
         players.filter(p => p.id !== pid).map(p =>
           e("option", {key: p.id, value: p.id},
-            "View: " + p.name + (preds[p.id + "-MODE"] === "quick" ? " (Quick Picks)" : ""))
+            "View: " + p.name + (effectiveMode(p.id, preds) === "quick" ? " (Quick Picks)" : ""))
         )
+      ),
+      viewId && e("div", {className: "mt-2 flex items-center justify-center gap-2 bg-blue-50 border-2 border-blue-300 rounded-xl px-3 py-2"},
+        e("span", {className: "text-lg"}, "\uD83D\uDC41\uFE0F"),
+        e("span", {className: "text-sm font-bold text-blue-900"},
+          "Looking at " + ((players.find(p => p.id === viewId) || {}).name) + "'s picks"),
+        e("span", {className: "text-xs font-bold text-blue-400"}, "(read-only)")
       )
     );
 
@@ -1820,22 +2012,29 @@ function App() {
         e("div", {className: "hidden md:block w-48 flex-shrink-0"},
           e("div", {className: "wc-card rounded-2xl p-4 shadow-2xl"},
             e("h3", {className: "text-sm font-bold text-blue-900 mb-3 border-b border-blue-200 pb-2"}, "Players"),
-            e("div", {className: "space-y-1"},
-              players.map(p =>
-                e("button", {
-                  key: p.id,
-                  onClick: () => switchView(p.id === viewId || p.id === pid ? null : p.id),
-                  className: "w-full text-left px-3 py-2 rounded-lg text-sm font-semibold transition flex items-center justify-between gap-1 " + (
-                    p.id === pid ? "bg-yellow-100 text-yellow-800" :
-                    p.id === viewId ? "bg-blue-600 text-white" :
-                    "text-blue-900 hover:bg-blue-50"
-                  )
-                },
-                  e("span", {className: "truncate"}, p.id === pid ? p.name + " (you)" : p.name),
-                  preds[p.id + "-MODE"] === "quick" && e("span", {className: "text-[9px] px-1.5 py-0.5 rounded-full font-bold flex-shrink-0 " + (p.id === viewId ? "bg-white/25 text-white" : "bg-amber-200 text-amber-800")}, "QP")
+            (() => {
+              const playerBtn = p => e("button", {
+                key: p.id,
+                onClick: () => switchView(p.id === viewId || p.id === pid ? null : p.id),
+                className: "w-full text-left px-3 py-2 rounded-lg text-sm font-semibold transition flex items-center justify-between gap-1 " + (
+                  p.id === pid ? "bg-yellow-100 text-yellow-800" :
+                  p.id === viewId ? "bg-blue-600 text-white" :
+                  "text-blue-900 hover:bg-blue-50"
                 )
-              )
-            ),
+              },
+                e("span", {className: "truncate"}, p.id === pid ? p.name + " (you)" : p.name)
+              );
+              const fullList  = players.filter(p => effectiveMode(p.id, preds) !== "quick");
+              const quickList = players.filter(p => effectiveMode(p.id, preds) === "quick");
+              const section = (label, list) => list.length > 0 && e("div", {key: label, className: "mb-3"},
+                e("div", {className: "text-[10px] font-bold text-blue-400 uppercase tracking-wider px-3 mb-1"}, label),
+                e("div", {className: "space-y-1"}, list.map(playerBtn))
+              );
+              return e("div", null,
+                section("Full Bracket", fullList),
+                section("Quick Picks", quickList)
+              );
+            })(),
             viewId && viewId !== pid && e("button", {
               onClick: () => setViewId(null),
               className: "mt-3 w-full text-xs text-gray-500 hover:text-red-500 text-center"
@@ -1843,9 +2042,15 @@ function App() {
           )
         ),
         e("div", {className: "flex-1 min-w-0"},
-          isRO && e("div", {className: "bg-yellow-50 border border-yellow-300 rounded-xl p-3 mb-4 text-sm font-semibold text-yellow-800 flex items-center justify-between gap-2 flex-wrap"},
+          isRO && viewId && e("div", {className: "bg-yellow-50 border border-yellow-300 rounded-xl p-3 mb-4 text-sm font-semibold text-yellow-800 flex items-center justify-between gap-2 flex-wrap"},
             e("span", null, "Viewing: " + ((players.find(p => p.id === viewId) || {}).name) + " (read-only)"),
             e("button", {onClick: () => setViewId(null), className: "px-3 py-1 rounded-lg bg-yellow-200 hover:bg-yellow-300 text-yellow-900 text-xs font-bold"}, "\u2190 Back to my picks")),
+          isRO && !viewId && e("div", {className: "bg-amber-50 border border-amber-300 rounded-xl p-3 mb-4 text-sm font-semibold text-amber-800 flex items-center justify-between gap-2 flex-wrap"},
+            e("span", null, "\uD83D\uDD12 Read-only \u2014 set a PIN to edit your own picks"),
+            e("button", {
+              onClick: () => { setPinInput(""); setPinError(""); setPinStage({id: pid, name: pname, mode: "setOptional"}); },
+              className: "px-3 py-1 rounded-lg bg-amber-200 hover:bg-amber-300 text-amber-900 text-xs font-bold"
+            }, "Set PIN now")),
           tabContent
         )
       )
@@ -1900,6 +2105,61 @@ function App() {
     );
   }
 
+  // ---- PIN modal (overlay, rendered above everything when pinStage is set) ----
+  const pinModal = pinStage && e("div", {
+    className: "fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4",
+    onClick: ev => { if (ev.target === ev.currentTarget && pinStage.mode === "enter") viewReadOnlyInsteadOfPin(); }
+  },
+    e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl max-w-sm w-full"},
+      pinStage.mode === "enter" && e("div", null,
+        e("h3", {className: "text-lg font-bold text-blue-900 mb-1"}, "Enter PIN for " + pinStage.name),
+        e("p", {className: "text-xs text-gray-500 mb-4"}, "This name is PIN-protected. Enter the 3-digit PIN to edit picks, or view read-only."),
+        e("input", {
+          type: "tel", inputMode: "numeric", maxLength: 3, value: pinInput, autoFocus: true,
+          onChange: ev => { setPinInput(ev.target.value.replace(/\D/g, "").slice(0, 3)); setPinError(""); },
+          onKeyPress: ev => { if (ev.key === "Enter") confirmPinEntry(); },
+          placeholder: "• • •",
+          className: "w-full text-center text-2xl tracking-[0.5em] font-mono px-4 py-3 border-2 border-blue-300 rounded-xl focus:outline-none focus:border-blue-600 mb-2"
+        }),
+        pinError && e("p", {className: "text-xs text-red-500 font-semibold mb-3"}, pinError),
+        e("div", {className: "flex gap-2 mt-3"},
+          e("button", {onClick: confirmPinEntry, className: "flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-bold text-sm hover:bg-blue-700"}, "Unlock"),
+          e("button", {onClick: viewReadOnlyInsteadOfPin, className: "flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-bold text-sm hover:bg-gray-200"}, "View read-only")
+        ),
+        e("button", {onClick: () => setPinStage(null), className: "w-full mt-3 text-xs text-gray-400 hover:text-gray-600"}, "Cancel")
+      ),
+      pinStage.mode === "setRequired" && e("div", null,
+        e("h3", {className: "text-lg font-bold text-blue-900 mb-1"}, "Set a PIN, " + pinStage.name),
+        e("p", {className: "text-xs text-gray-500 mb-4"}, "Pick any 3 digits. This just stops other people from accidentally changing your picks if they tap your name \u2014 not a real password, so don't reuse anything sensitive."),
+        e("input", {
+          type: "tel", inputMode: "numeric", maxLength: 3, value: pinInput, autoFocus: true,
+          onChange: ev => { setPinInput(ev.target.value.replace(/\D/g, "").slice(0, 3)); setPinError(""); },
+          onKeyPress: ev => { if (ev.key === "Enter") confirmSetPin(false); },
+          placeholder: "• • •",
+          className: "w-full text-center text-2xl tracking-[0.5em] font-mono px-4 py-3 border-2 border-blue-300 rounded-xl focus:outline-none focus:border-blue-600 mb-2"
+        }),
+        pinError && e("p", {className: "text-xs text-red-500 font-semibold mb-3"}, pinError),
+        e("button", {onClick: () => confirmSetPin(false), className: "w-full py-2.5 bg-blue-600 text-white rounded-lg font-bold text-sm hover:bg-blue-700 mt-3"}, "Set PIN & continue")
+      ),
+      pinStage.mode === "setOptional" && e("div", null,
+        e("h3", {className: "text-lg font-bold text-blue-900 mb-1"}, "Protect your picks, " + pinStage.name + "?"),
+        e("p", {className: "text-xs text-gray-500 mb-4"}, "You don't have a PIN set yet. Add one now so nobody else can accidentally edit your picks \u2014 or skip and you'll be view-only until you set one."),
+        e("input", {
+          type: "tel", inputMode: "numeric", maxLength: 3, value: pinInput, autoFocus: true,
+          onChange: ev => { setPinInput(ev.target.value.replace(/\D/g, "").slice(0, 3)); setPinError(""); },
+          onKeyPress: ev => { if (ev.key === "Enter") confirmSetPin(false); },
+          placeholder: "• • •",
+          className: "w-full text-center text-2xl tracking-[0.5em] font-mono px-4 py-3 border-2 border-blue-300 rounded-xl focus:outline-none focus:border-blue-600 mb-2"
+        }),
+        pinError && e("p", {className: "text-xs text-red-500 font-semibold mb-3"}, pinError),
+        e("div", {className: "flex gap-2 mt-3"},
+          e("button", {onClick: () => confirmSetPin(false), className: "flex-1 py-2.5 bg-blue-600 text-white rounded-lg font-bold text-sm hover:bg-blue-700"}, "Set PIN"),
+          e("button", {onClick: () => confirmSetPin(true), className: "flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-bold text-sm hover:bg-gray-200"}, "Skip for now")
+        )
+      )
+    )
+  );
+
   return e("div", {className: "min-h-screen wc-bg p-4 md:p-6"},
     e("div", {className: "max-w-7xl mx-auto"},
       e("div", {className: "text-center mb-6"},
@@ -1908,6 +2168,7 @@ function App() {
       ),
       mainView
     ),
+    pinModal,
     saveStatus && e("div", {
       className: "fixed bottom-4 right-4 z-50 px-4 py-2 rounded-full text-sm font-bold shadow-2xl flex items-center gap-2 " + (
         saveStatus === "saving" ? "bg-blue-600 text-white" :

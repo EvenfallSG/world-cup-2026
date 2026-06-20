@@ -1,5 +1,5 @@
 # Sports Prediction Apps — Project Brief
-> Last updated: June 20, 2026 (session 3)
+> Last updated: June 20, 2026 (session 4)
 > For Victor Manggunio (EvenfallSG)
  
 ---
@@ -274,8 +274,21 @@ L: England, Croatia, Ghana, Panama
  
 ---
  
+## SECURITY STATUS (session 4 update)
+
+**✅ RESOLVED — admin auth is now server-side.** Three Netlify Functions (`netlify/functions/admin-login.js`, `set-result.js`, `sync-results.js`) replaced the old plaintext-password-in-`index.html` approach:
+- `admin-login.js` checks the password against the `ADMIN_PASSWORD` env var and returns a signed, time-limited (12hr) session token (HMAC, Node's built-in `crypto`, no extra npm package)
+- `set-result.js` requires that token (verified via `ADMIN_TOKEN_SECRET`) before writing any result to Firebase
+- `sync-results.js` runs the openfootball auto-sync server-side on a cron schedule (see `netlify.toml`), removing ~136 lines of client-side sync logic from `index.html`
+- Required env vars (already set in Netlify): `ADMIN_PASSWORD`, `ADMIN_TOKEN_SECRET`, `FIREBASE_DB_URL`, `FIREBASE_SERVICE_ACCOUNT`, `FOOTBALL_API_KEY`
+- `package.json` declares `firebase-admin` as a dependency (required for the functions to use the Firebase service account)
+
+**Verified working end-to-end on the live site** as of commit `1f89378`, tagged **`v1.0-secure-stable`** on GitHub — correct password issues a token, wrong password / tampered token are rejected with 401, and the score-sync and scorer-ticker functions both return 200. **If anything breaks later, `v1.0-secure-stable` is the known-good rollback point.**
+
+**⚠️ Known issue hit and fixed in session 4:** during the manual GitHub upload in session 3, `admin-login.js` ended up containing the full pasted contents of `set-result.js` and `sync-results.js` appended after it (likely a paste landing in the wrong file before switching the filename). This created a duplicate `function verifyToken` declaration, which crashed both `admin-login` and `set-result` with a 502 at runtime — **even though the Netlify build and deploy showed green**, because Netlify bundles function code without executing it, so a top-level syntax/declaration error only surfaces on the first real invocation. Lesson for future sessions: **a clean deploy does not mean a working function** — always test the actual endpoints (e.g. `fetch('/.netlify/functions/admin-login', {method:'POST', body:...})`) after any change to `netlify/functions/*`, not just check the deploy log.
+
 ## KNOWN LIMITATIONS / FUTURE IDEAS
-- **Admin password is plaintext in the public `index.html`** — anyone who reads the source can find `ADMIN_PASSWORD`. Low real-world risk for a friends-group app, but worth moving server-side eventually (e.g. via a Netlify function, like the scorer proxy)
+- **Firebase Realtime Database rules are still public read/write** (`{"read": true, "write": true}`). This was intentionally deferred until the server-side functions above were confirmed working in production — which they now are. **This is the natural next step.** Tightening these to restrict writes (ideally routing ALL writes through Netlify Functions rather than direct client `fetch` PUTs) is the main remaining security gap.
 - Third-place slot assignment uses backtracking against the official constraint matrix — should match the real FIFA allocation correctly, but hasn't been cross-checked against every one of the 495 possible combinations
 - No rate-limit handling if football-data.org's free tier is hit hard — currently low-risk given the 30-minute refresh interval
 - Could add: bonus points for correct scores in knockout matches (currently win/loss only), group winner prediction bonus, "most goals in tournament" side bet
@@ -285,7 +298,7 @@ L: England, Croatia, Ghana, Panama
  
 Paste this at the start of a new conversation:
  
-> "I'm continuing work on my FIFA World Cup 2026 Predictor app. It's a single-file React app (no build step) deployed at wcpred2026.netlify.app via GitHub repo EvenfallSG/world-cup-2026. Firebase Realtime Database at world-cup-2026-predictio-23e8f-default-rtdb.firebaseio.com (public read/write rules). The app has: group stage score predictions for all 72 matches, auto-calculated FIFA standings, a mirrored bracket following official Appendix A structure (M73–M104) with Bronze Final, podium panel, Quick Picks mode with a C.B.F. randomiser, PIN-protected picks, a full scoring engine, a split (Full Bracket / Quick Picks) leaderboard, an admin Results tab with auto-sync from openfootball.json plus a live Golden Boot ticker via a football-data.org Netlify function proxy, and a mobile-specific stacked bracket view. The latest index.html is attached. I need help with: [YOUR NEXT TASK]"
+> "I'm continuing work on my FIFA World Cup 2026 Predictor app. It's a single-file React app (no build step) deployed at wcpred2026.netlify.app via GitHub repo EvenfallSG/world-cup-2026. Firebase Realtime Database at world-cup-2026-predictio-23e8f-default-rtdb.firebaseio.com (rules are STILL public read/write — see Known Limitations). The app has: group stage score predictions for all 72 matches, auto-calculated FIFA standings, a mirrored bracket following official Appendix A structure (M73–M104) with Bronze Final, podium panel, Quick Picks mode with a C.B.F. randomiser, PIN-protected picks, a full scoring engine, a split (Full Bracket / Quick Picks) leaderboard, an admin Results tab, and a mobile-specific stacked bracket view. Admin auth and result writes now run server-side via Netlify Functions (admin-login.js, set-result.js, sync-results.js) — no plaintext password in the client. The known-good stable version is tagged `v1.0-secure-stable` on GitHub (commit 1f89378) if anything needs rolling back. The latest index.html is attached. I need help with: [YOUR NEXT TASK]"
  
 Then attach the `index.html` file.
  

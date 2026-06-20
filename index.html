@@ -466,6 +466,30 @@ function App() {
   // useMemo below needs it, and useMemo/useState must run before any early return.
   const fmtKO = (ms) => new Date(ms).toLocaleString(undefined, {weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit"});
 
+  // ---- GOLDEN BOOT live scorer stat (for the news ticker) ----
+  // Calls our own Netlify Function, never football-data.org directly — the
+  // function holds the real API key server-side. We just get back a clean
+  // { scorers: [{name, team, goals}, ...] } shape.
+  // NOTE: this must be declared before the ticker hooks below, since tickerItems
+  // (a useMemo) reads topScorers — declaring it after would throw
+  // "Cannot access 'topScorers' before initialization".
+  const [topScorers, setTopScorers] = useState([]);
+  useEffect(() => {
+    const loadScorers = async () => {
+      try {
+        const r = await fetch("/.netlify/functions/scorers");
+        if (!r.ok) return; // fail quietly — ticker just won't show this item
+        const data = await r.json();
+        if (Array.isArray(data.scorers)) setTopScorers(data.scorers);
+      } catch {
+        // network hiccup — ticker simply omits the scorer item until next try
+      }
+    };
+    loadScorers();
+    const iv = setInterval(loadScorers, 30 * 60 * 1000); // matches the score-sync cadence
+    return () => clearInterval(iv);
+  }, []);
+
   // ---- TICKER TAPE hooks ----
   // These must live before any early `return` below (loading/live/setup/login/mode-choice screens
   // each return early) so the hook count stays identical on every render — calling hooks after an
@@ -705,27 +729,6 @@ function App() {
   useEffect(() => {
     syncLiveScores();
     const iv = setInterval(syncLiveScores, 30 * 60 * 1000);
-    return () => clearInterval(iv);
-  }, []);
-
-  // ---- GOLDEN BOOT live scorer stat (for the news ticker) ----
-  // Calls our own Netlify Function, never football-data.org directly — the
-  // function holds the real API key server-side. We just get back a clean
-  // { scorers: [{name, team, goals}, ...] } shape.
-  const [topScorers, setTopScorers] = useState([]);
-  useEffect(() => {
-    const loadScorers = async () => {
-      try {
-        const r = await fetch("/.netlify/functions/scorers");
-        if (!r.ok) return; // fail quietly — ticker just won't show this item
-        const data = await r.json();
-        if (Array.isArray(data.scorers)) setTopScorers(data.scorers);
-      } catch {
-        // network hiccup — ticker simply omits the scorer item until next try
-      }
-    };
-    loadScorers();
-    const iv = setInterval(loadScorers, 30 * 60 * 1000); // matches the score-sync cadence
     return () => clearInterval(iv);
   }, []);
 

@@ -1,0 +1,8 @@
+{
+  "name": "world-cup-2026-predictor",
+  "private": true,
+  "description": "Server-side dependencies for Netlify Functions (netlify/functions/). The front end (index.html) is a standalone, no-build-step React app and does not use anything declared here.",
+  "dependencies": {
+    "firebase-admin": "^12.0.0"
+  }
+}

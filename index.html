@@ -434,7 +434,11 @@ function App() {
   const [groupView, setGroupView] = useState("date");
   const [adminMode, setAdminMode] = useState(false);
   const [adminPwInput, setAdminPwInput] = useState("");
-  const ADMIN_PASSWORD = "Rollopollo";
+  const [adminError, setAdminError] = useState("");
+  // adminToken holds the short-lived session token from admin-login.js once
+  // the real password has been verified server-side. There is no client-side
+  // password constant anymore — the function is the only thing that knows it.
+  const [adminToken, setAdminToken] = useState(null);
   const [syncStatus, setSyncStatus] = useState(null);
   const [lastSynced, setLastSynced] = useState(null);
   const recentEdits = useRef({});
@@ -595,142 +599,12 @@ function App() {
     return () => clearInterval(iv);
   }, []);
 
-  // ---- AUTO-SYNC from wc2026api.com ----
-  const syncLiveScores = async () => {
-    setSyncStatus("syncing");
-    try {
-      const res = await fetch(
-        "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json"
-      );
-      if (!res.ok) { setSyncStatus("error"); return; }
-      const data = await res.json();
-      const matches = data.matches || [];
-
-      // Team name differences between openfootball and our app
-      const TN = {
-        "Bosnia & Herzegovina": "Bosnia-Herzegovina",
-        "Czech Republic":       "Czechia",
-        "Cura\u00e7ao":         "Curacao",
-        "DR Congo":             "Congo DR",
-        "Turkey":               "Turkiye",
-        "USA":                  "United States",
-        "South Korea":          "South Korea",
-        "Ivory Coast":          "Ivory Coast",
-      };
-      const norm = t => TN[t] || t;
-
-      // Build a lookup from "team1|team2" → our GM match id
-      const gmLookup = {};
-      GM.forEach(m => {
-        gmLookup[m.t1 + "|" + m.t2] = m.id;
-        gmLookup[m.t2 + "|" + m.t1] = m.id; // handle flipped order
-      });
-
-      const updates = {};
-
-      matches.forEach(m => {
-        if (!m.score) return; // no result yet
-        const sc = m.score;
-        const ft = sc.ft; // [score1, score2] at full time
-        if (!ft) return;
-
-        const t1 = norm(m.team1);
-        const t2 = norm(m.team2);
-
-        if (m.group) {
-          // Group stage match — store as "score1-score2"
-          // Try direct key first, then flipped
-          const id = gmLookup[t1 + "|" + t2] || gmLookup[t2 + "|" + t1];
-          if (id) {
-            // If teams are flipped vs our data, swap scores
-            const gm = GM.find(x => x.id === id);
-            if (gm && gm.t1 === t2) {
-              updates[id] = ft[1] + "-" + ft[0]; // swap
-            } else {
-              updates[id] = ft[0] + "-" + ft[1];
-            }
-          }
-        } else {
-          // Knockout match — team names are W73/W74 placeholders until known
-          // openfootball uses W73..W104 for KO match winners
-          // round field tells us which round it is
-          // We identify by the winning team name once scores are in
-          const round = (m.round || "").toLowerCase();
-          // Determine winner
-          let winner = null;
-          if (sc.p) {
-            // Penalties — winner is whoever won the shootout
-            winner = sc.p[0] > sc.p[1] ? t1 : t2;
-          } else if (ft[0] !== ft[1]) {
-            winner = ft[0] > ft[1] ? t1 : t2;
-          }
-          // Match openfootball KO matches to our M73..M104 by team names
-          // We scan our KO match list to find the right match
-          if (winner) {
-            const allKO = [...R32, ...R16, ...QF, ...SF,
-                           {id:"M103"}, {id:"M104"}];
-            // Try to match by team names appearing in the KO slot
-            // Since slots use placeholder codes (1A, 2B etc), we match by round + teams
-            // The most reliable signal: if t1 and t2 are real team names (not codes)
-            if (!t1.match(/^[0-9W]/) && !t2.match(/^[0-9W]/)) {
-              // Both are real team names — find which KO match has these two teams
-              // by checking our resolved slots (already in preds via calcStandings)
-              // We store by looking for the match that has both team names as slots
-              // Simplest: match on round label
-              const roundMap = {
-                "round of 32":  R32,
-                "round of 16":  R16,
-                "quarter-final": QF,
-                "quarter-finals": QF,
-                "semi-final":   SF,
-                "semi-finals":  SF,
-                "third place":  [{id:"M103"}],
-                "third-place":  [{id:"M103"}],
-                "final":        [{id:"M104"}],
-              };
-              // Find round bucket
-              let bucket = null;
-              for (const [k, v] of Object.entries(roundMap)) {
-                if (round.includes(k)) { bucket = v; break; }
-              }
-              // Within bucket, check if we already have a result for any match
-              // and this one isn't it — just store all matches in the round
-              // For now store winner under a temp key; admin can review
-              // Better: match by date order within the round
-              // openfootball KO data will have W73/W74 as team names until groups finish
-              // So this branch only fires when real names are known
-              if (bucket) {
-                // Find first unfilled slot in this round
-                const unfilled = bucket.find(bm => !updates[bm.id] && !results[bm.id]);
-                if (unfilled) updates[unfilled.id] = winner;
-              }
-            }
-          }
-        }
-      });
-
-      // Only write changed values
-      const toWrite = {};
-      Object.entries(updates).forEach(([k, v]) => {
-        if (results[k] !== v) toWrite[k] = v;
-      });
-      if (Object.keys(toWrite).length > 0) {
-        await Promise.all(Object.entries(toWrite).map(([k, v]) => fbSetResult(k, v)));
-        setResults(prev => ({...prev, ...toWrite}));
-      }
-      setLastSynced(new Date());
-      setSyncStatus("ok");
-    } catch (err) {
-      setSyncStatus("error");
-    }
-  };
-
-  // Auto-sync every 30 minutes (openfootball updates ~once a day, so no need to hammer it)
-  useEffect(() => {
-    syncLiveScores();
-    const iv = setInterval(syncLiveScores, 30 * 60 * 1000);
-    return () => clearInterval(iv);
-  }, []);
+  // ---- AUTO-SYNC moved server-side ----
+  // The openfootball fetch + Firebase write that used to run here now runs
+  // in netlify/functions/sync-results.js on a 30-minute schedule, entirely
+  // server-side. This means the browser no longer needs (or has) write
+  // access to /results at all -- not for the admin Results tab, and not for
+  // this sync. See that file for the actual sync logic.
 
   // playerHasPicks: true if this player has made ANY prediction yet (used to decide
   // whether a pin-less player is treated as "new" (must set pin) or "existing" (can skip, read-only).
@@ -825,6 +699,55 @@ function App() {
     setPinStage(null);
   };
   const logout = () => { setPid(null); setPname(""); setViewId(null); setTab("login"); setEditUnlocked(true); setPinStage(null); };
+
+  // ---- Admin auth (server-verified, no client-side password) ----
+  // Exchanges the typed password for a short-lived session token via
+  // admin-login.js. The real password lives only in a Netlify environment
+  // variable that this function never sees — it just forwards what the
+  // person typed and trusts the server's yes/no answer.
+  const attemptAdminLogin = async () => {
+    if (!adminPwInput.trim()) return;
+    setAdminError("");
+    try {
+      const r = await fetch("/.netlify/functions/admin-login", {
+        method: "POST",
+        body: JSON.stringify({ password: adminPwInput }),
+      });
+      const data = await r.json();
+      if (r.ok && data.token) {
+        setAdminToken(data.token);
+        setAdminMode(true);
+        setAdminPwInput("");
+      } else {
+        setAdminError(data.error || "Wrong password");
+      }
+    } catch {
+      setAdminError("Network error — try again");
+    }
+  };
+
+  // Writes a single result via set-result.js, using the session token from
+  // attemptAdminLogin instead of any password. If the token has expired,
+  // drops back to the login form so the admin can re-enter the password.
+  const setResultViaFunction = async (matchId, value) => {
+    if (!adminToken) return false;
+    try {
+      const r = await fetch("/.netlify/functions/set-result", {
+        method: "POST",
+        body: JSON.stringify({ token: adminToken, matchId, value }),
+      });
+      if (r.status === 401) {
+        // Session expired or invalid — force re-login rather than silently failing.
+        setAdminMode(false);
+        setAdminToken(null);
+        setAdminError("Session expired — please log in again");
+        return false;
+      }
+      return r.ok;
+    } catch {
+      return false;
+    }
+  };
 
   // ---- Kickoff locking ----
   const isLockedKey = (mid) => {
@@ -1757,7 +1680,7 @@ function App() {
         if (!adminMode) return;
         const cleaned = val.trim();
         setResults(prev => ({...prev, [key]: cleaned}));
-        await fbSetResult(key, cleaned);
+        await setResultViaFunction(key, cleaned);
       };
 
       const resultInput = (matchId, placeholder, isScore) => {
@@ -1988,43 +1911,38 @@ function App() {
               ? e("div", {className: "flex items-center gap-2 bg-emerald-100 border border-emerald-300 rounded-xl px-4 py-2"},
                   e("div", {className: "w-2 h-2 rounded-full bg-emerald-500"}),
                   e("span", {className: "text-emerald-800 text-sm font-bold"}, "Admin mode"),
-                  e("button", {onClick: () => setAdminMode(false), className: "ml-2 text-xs text-red-500 hover:text-red-700 font-bold"}, "Exit")
+                  e("button", {onClick: () => { setAdminMode(false); setAdminToken(null); }, className: "ml-2 text-xs text-red-500 hover:text-red-700 font-bold"}, "Exit")
                 )
-              : e("div", {className: "flex gap-2 items-center"},
-                  e("input", {type:"password", value:adminPwInput, onChange:ev=>setAdminPwInput(ev.target.value),
-                    onKeyPress: ev=>{ if(ev.key==="Enter"&&adminPwInput===ADMIN_PASSWORD){setAdminMode(true);setAdminPwInput("");} },
-                    placeholder:"Admin password",
-                    className:"px-3 py-2 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 w-40"
-                  }),
-                  e("button", {
-                    onClick:()=>{ if(adminPwInput===ADMIN_PASSWORD){setAdminMode(true);setAdminPwInput("");} },
-                    className:"px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700"
-                  }, "Unlock")
+              : e("div", {className: "flex flex-col items-end gap-1"},
+                  e("div", {className: "flex gap-2 items-center"},
+                    e("input", {type:"password", value:adminPwInput, onChange:ev=>{setAdminPwInput(ev.target.value); setAdminError("");},
+                      onKeyPress: ev=>{ if(ev.key==="Enter") attemptAdminLogin(); },
+                      placeholder:"Admin password",
+                      className:"px-3 py-2 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500 w-40"
+                    }),
+                    e("button", {
+                      onClick: attemptAdminLogin,
+                      className:"px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700"
+                    }, "Unlock")
+                  ),
+                  adminError && e("p", {className: "text-xs text-red-500 font-semibold"}, adminError)
                 )
           )
         ),
 
         // ── Sync status bar ──────────────────────────────────────────────────────
+        // Sync now runs server-side every 30 minutes (netlify/functions/sync-results.js)
+        // rather than being something the browser can trigger or report live status
+        // for. Admins with Netlify dashboard access can force an immediate run from
+        // the Functions page there if needed (Netlify's scheduled functions can't be
+        // triggered from a public URL by design, which is what keeps this secure).
         e("div", {className: "flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl p-3 mb-5 flex-wrap"},
           e("div", {className: "flex items-center gap-2 flex-1"},
-            syncStatus === "syncing"
-              ? e("div", {className: "w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0"})
-              : syncStatus === "ok"
-              ? e("div", {className: "w-3 h-3 rounded-full bg-emerald-400 flex-shrink-0"})
-              : syncStatus === "error"
-              ? e("div", {className: "w-3 h-3 rounded-full bg-red-400 flex-shrink-0"})
-              : e("div", {className: "w-3 h-3 rounded-full bg-gray-300 flex-shrink-0"}),
+            e("div", {className: "w-3 h-3 rounded-full bg-emerald-400 flex-shrink-0"}),
             e("span", {className: "text-sm font-semibold text-blue-800"},
-              syncStatus === "syncing" ? "Syncing scores\u2026" :
-              syncStatus === "ok" ? ("Synced \u2713" + (lastSynced ? " \u00b7 " + lastSynced.toLocaleTimeString() : "") + " \u00b7 openfootball updates ~daily") :
-              syncStatus === "error" ? "Sync failed \u2014 enter scores manually below" :
-              "Auto-syncs from openfootball on load \u00b7 ~24hr delay after matches"
+              "Auto-syncs from openfootball every 30 minutes (server-side) \u00b7 admin can also enter scores manually below"
             )
-          ),
-          e("button", {
-            onClick: syncLiveScores,
-            className: "text-xs font-bold px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex-shrink-0"
-          }, "\uD83D\uDD04 Sync now")
+          )
         ),
 
         livePreview,

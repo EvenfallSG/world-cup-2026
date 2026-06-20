@@ -1,2 +1,10 @@
 [build]
      functions = "netlify/functions"
+     # sync-results runs automatically every 30 minutes (cron syntax: */30 * * * *)
+# to pull completed match results from openfootball/worldcup.json and write
+# them server-side via the Firebase Admin SDK. This replaces the old
+# client-side syncLiveScores() function in index.html, which used to write
+# to Firebase directly from the browser. Moving it here means the browser
+# no longer needs write access to /results at all.
+[functions."sync-results"]
+    schedule = "*/30 * * * *"

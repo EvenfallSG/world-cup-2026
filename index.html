@@ -9,7 +9,7 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet">
 <style>
 body{margin:0;padding:0;font-family:'Inter',system-ui,sans-serif;}
 .wc-bg{background:
@@ -21,6 +21,50 @@ body{margin:0;padding:0;font-family:'Inter',system-ui,sans-serif;}
   text-shadow:0 2px 24px rgba(251,191,36,.25), 0 1px 2px rgba(0,0,0,.4);}
 .wc-card{background:rgba(255,255,255,.96);backdrop-filter:blur(10px);
   border:1px solid rgba(255,255,255,.55);box-shadow:0 24px 60px rgba(3,12,32,.45);}
+/* --- Dark-glass redesign (login screen) --- */
+.wc-d-card{background:rgba(255,255,255,.045);backdrop-filter:blur(14px);
+  border:1px solid rgba(255,255,255,.09);border-radius:20px;overflow:hidden;
+  box-shadow:0 26px 56px rgba(2,8,20,.48);color:#f2f4f8;}
+.wc-d-dim{color:#7e8db0;}
+.wc-d-white{color:#f2f4f8;}
+.wc-d-gold{color:#f6c453;}
+.wc-d-eyebrow{display:inline-flex;align-items:center;gap:7px;color:#f6c453;font-size:11px;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;}
+.wc-d-eyebrow .dot{width:6px;height:6px;border-radius:50%;background:#4fd6a0;
+  box-shadow:0 0 0 3px rgba(79,214,160,.18);animation:wcdpulse 2s ease-in-out infinite;}
+@keyframes wcdpulse{0%,100%{opacity:1}50%{opacity:.45}}
+.wc-d-cbox{background:rgba(255,255,255,.045);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.09);
+  border-radius:10px;padding:8px 8px;min-width:48px;text-align:center;box-shadow:0 10px 22px rgba(2,8,20,.3);}
+.wc-d-cbox .n{font-size:20px;font-weight:800;font-variant-numeric:tabular-nums;color:#f2f4f8;
+  font-family:'JetBrains Mono',monospace;}
+.wc-d-cbox .l{font-size:8.5px;color:#7e8db0;font-weight:600;letter-spacing:.08em;text-transform:uppercase;}
+.wc-d-fixturerow{font-size:12.5px;color:#d6dcec;font-weight:600;}
+.wc-d-fixturerow b{color:#f2f4f8;font-weight:700;}
+.wc-d-fixturerow.extra{font-size:11.5px;color:#7e8db0;}
+.wc-d-rulesnote{border-radius:14px;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.03);
+  padding:12px 14px;display:flex;gap:10px;align-items:flex-start;}
+.wc-d-rulesnote p{margin:0;font-size:11.5px;color:#7e8db0;line-height:1.55;}
+.wc-d-whatsnew{border-radius:14px;border:1px solid rgba(167,139,250,.25);
+  background:linear-gradient(165deg,rgba(167,139,250,.1),rgba(167,139,250,.02));padding:13px 14px;}
+.wc-d-whatsnew-tag{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;
+  letter-spacing:.08em;text-transform:uppercase;color:#e3d9ff;}
+.wc-d-search input{width:100%;padding:13px 16px 13px 40px;border-radius:13px;
+  border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.09);color:#f2f4f8;
+  font-size:14px;font-family:inherit;}
+.wc-d-search input::placeholder{color:#aab4cc;}
+.wc-d-search input:focus{outline:none;background:rgba(255,255,255,.12);
+  border-color:rgba(246,196,83,.45);box-shadow:0 0 0 3px rgba(246,196,83,.12);}
+.wc-d-pcard{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:13px;
+  border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.03);cursor:pointer;
+  transition:border-color .18s ease, background .18s ease, transform .18s ease;text-align:left;width:100%;}
+.wc-d-pcard:hover{border-color:rgba(246,196,83,.35);background:rgba(255,255,255,.06);transform:translateY(-1px);}
+.wc-d-pavatar{font-size:26px;line-height:1;display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;width:32px;}
+.wc-d-pname{font-size:13.5px;font-weight:700;color:#f2f4f8;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;flex:1;min-width:0;}
+.wc-d-footerrow{display:flex;align-items:center;justify-content:space-between;
+  border-top:1px solid rgba(255,255,255,.09);font-size:11.5px;color:#7e8db0;font-weight:500;}
+.wc-d-footerrow b{color:#f6c453;font-weight:700;}
 .wc-tab{transition:all .18s ease;letter-spacing:.3px;}
 .wc-tab-on{background:linear-gradient(120deg,#fbbf24,#f59e0b);color:#0c1f3f;
   box-shadow:0 4px 14px rgba(245,158,11,.45);transform:translateY(-1px);}
@@ -263,6 +307,25 @@ function effectiveMode(pid, preds) {
   }).length;
   if (groupPicksMade >= FULL_MODE_THRESHOLD) return "full";
   return preds[pid + "-MODE"] === "quick" ? "quick" : (preds[pid + "-MODE"] || null);
+}
+
+// Returns the team name a player picked to win the whole tournament, regardless of mode —
+// Quick Picks players store this as QP_WIN, Full Bracket players store it as their M104 pick.
+// Returns null if they haven't made that pick yet (shown as a generic placeholder, never guessed).
+function getChampionPick(pid, preds) {
+  const mode = effectiveMode(pid, preds);
+  const pick = mode === "quick" ? preds[pid + "-QP_WIN"] : preds[pid + "-M104"];
+  return (pick && typeof pick === "string") ? pick : null;
+}
+
+// Returns every group-stage match sharing the soonest upcoming kickoff time (handles the
+// common case of simultaneous group matches), or [] if none remain. Pure function of nowTick
+// so it can be called from anywhere, including before login, without depending on component state.
+function getNextKickoffs(nowTick) {
+  const upcoming = GM.filter(m => KICKOFF[m.id] && KICKOFF[m.id] > nowTick);
+  if (!upcoming.length) return [];
+  const soonest = Math.min(...upcoming.map(m => KICKOFF[m.id]));
+  return upcoming.filter(m => KICKOFF[m.id] === soonest);
 }
 
 // ---- OFFICIAL KICKOFF TIMES (stored in UTC, displayed in each viewer's local time) ----
@@ -598,6 +661,14 @@ function App() {
     const iv = setInterval(load, 8000);
     return () => clearInterval(iv);
   }, []);
+
+  // Login screen's "next kickoff" countdown needs second-resolution ticking; everywhere else
+  // the 8s poll above is plenty. Only runs while the login screen (no pid yet) is on screen.
+  useEffect(() => {
+    if (!started || pid) return;
+    const fast = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(fast);
+  }, [started, pid]);
 
   // ---- AUTO-SYNC moved server-side ----
   // The openfootball fetch + Firebase write that used to run here now runs
@@ -1050,79 +1121,114 @@ function App() {
     const filtered = newName.trim()
       ? sortedPlayers.filter(p => p.name.toLowerCase().includes(newName.trim().toLowerCase()))
       : sortedPlayers;
+    const nextKickoffs = getNextKickoffs(nowTick);
 
-    mainView = e("div", {className: "wc-card rounded-2xl p-8 shadow-2xl max-w-lg mx-auto"},
-      e("h2", {className: "text-2xl font-bold text-blue-900 mb-1 text-center"}, "Who are you?"),
-      e("p", {className: "text-gray-500 text-sm text-center mb-6"}, "Select your name to enter your picks"),
-
-      !whatsNewDismissed && e("div", {className: "mb-5 rounded-xl border border-blue-200 bg-blue-50 p-3.5"},
-        e("div", {className: "flex items-start justify-between gap-2 mb-1.5"},
-          e("span", {className: "text-xs font-extrabold text-blue-700 uppercase tracking-wider"}, "\u2728 What's new"),
-          e("button", {onClick: () => setWhatsNewDismissed(true), className: "text-blue-400 hover:text-blue-700 text-xs font-bold leading-none"}, "\u2715")
+    mainView = e("div", {className: "max-w-lg mx-auto"},
+      // Hero: title + live next-kickoff countdown (no card — sits directly on the page background)
+      e("div", {className: "text-center mb-6"},
+        e("span", {className: "wc-d-eyebrow"}, e("span", {className: "dot"}), "Group stage \u00b7 live"),
+        nextKickoffs.length > 0 && e("div", {className: "flex justify-center gap-2 mt-4"},
+          (() => {
+            const ms = KICKOFF[nextKickoffs[0].id] - nowTick;
+            const dd = Math.max(0, Math.floor(ms / 86400000));
+            const hh = Math.max(0, Math.floor((ms % 86400000) / 3600000));
+            const mm = Math.max(0, Math.floor((ms % 3600000) / 60000));
+            const ss = Math.max(0, Math.floor((ms % 60000) / 1000));
+            const box = (n, l) => e("div", {className: "wc-d-cbox", key: l},
+              e("div", {className: "n"}, String(n).padStart(2, "0")),
+              e("div", {className: "l"}, l));
+            return [box(dd, "Days"), box(hh, "Hrs"), box(mm, "Min"), box(ss, "Sec")];
+          })()
         ),
-        e("ul", {className: "text-xs text-blue-800 space-y-1 list-disc pl-4"},
-          e("li", null, "Joining is open the whole group stage now \u2014 jump in anytime before the knockouts start"),
-          e("li", null, "You can set a 3-digit PIN to stop others accidentally changing your picks"),
-          e("li", null, "Viewing a friend's picks is easier on mobile \u2014 a clear banner shows whose picks you're looking at"),
-          e("li", null, "The leaderboard now shows Full Bracket and Quick Picks players separately"),
-          e("li", null, "A ticker at the bottom shows the latest results and leaderboard movement")
+        nextKickoffs.length > 0 && e("div", {className: "mt-3"},
+          e("p", {className: "text-[10.5px] font-bold uppercase tracking-wider wc-d-dim mb-1"},
+            nextKickoffs.length > 1 ? "Next kickoffs" : "Next kickoff"),
+          nextKickoffs.map((m, i) =>
+            e("div", {key: m.id, className: "wc-d-fixturerow" + (i > 0 ? " extra" : "")},
+              e("b", null, getFlag(m.t1) + " " + m.t1), " vs ", e("b", null, getFlag(m.t2) + " " + m.t2))
+          )
         )
       ),
 
-      // Search / join input — dual purpose
-      e("div", {className: "relative mb-5"},
-        e("input", {
-          type: "text", value: newName,
-          onChange: ev => setNewName(ev.target.value),
-          onKeyPress: async ev => {
-            if (ev.key === "Enter" && regOpen() && newName.trim() && !players.find(p => p.name.toLowerCase() === newName.trim().toLowerCase())) {
-              const p = await addPlayer();
-              if (p) requestLogin(p.id, p.name);
-            }
-          },
-          placeholder: regOpen() ? "Search players or type your name to join…" : "Search players…",
-          className: "w-full pl-10 pr-4 py-3 border-2 border-blue-200 rounded-xl text-sm focus:outline-none focus:border-blue-500 bg-white"
-        }),
-        e("span", {className: "absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-base"}, "\uD83D\uDD0D")
-      ),
+      e("div", {className: "wc-d-card p-6"},
+        e("h2", {className: "text-center mb-1", style: {fontFamily: "'Bebas Neue',sans-serif", fontSize: "24px", letterSpacing: "1px"}}, "Who are you?"),
+        e("p", {className: "text-center text-sm wc-d-dim mb-4"}, "Select your name to enter your picks"),
 
-      // Player grid — alphabetical, compact pills
-      e("div", {className: "grid grid-cols-2 sm:grid-cols-3 gap-2 mb-5"},
-        filtered.length > 0
-          ? filtered.map(p =>
-              e("button", {
-                key: p.id,
-                onClick: () => { setNewName(""); requestLogin(p.id, p.name); },
-                className: "flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 border-blue-100 bg-white hover:border-blue-500 hover:bg-blue-50 hover:shadow-md transition text-left group"
-              },
-                e("span", {className: "w-7 h-7 rounded-full bg-blue-100 group-hover:bg-blue-500 flex items-center justify-center text-xs font-black text-blue-700 group-hover:text-white flex-shrink-0 transition"},
-                  p.name.charAt(0).toUpperCase()),
-                e("span", {className: "text-sm font-semibold text-blue-900 truncate"}, p.name),
-                p.pin && e("span", {className: "text-[11px] ml-auto opacity-50 flex-shrink-0"}, "\uD83D\uDD12")
-              )
-            )
-          : e("div", {className: "col-span-3 text-center py-4 text-sm text-gray-400 italic"},
-              newName.trim() ? "No player found \u2014 " + (regOpen() ? "press Enter to join as \"" + newName.trim() + "\"" : "joining is closed, knockouts have started") : "No players yet"
-            )
-      ),
+        // Permanent rules note — explains the locking mechanic, never dismissed (unlike What's New below)
+        e("div", {className: "wc-d-rulesnote mb-4"},
+          e("span", {style: {fontSize: "14px", opacity: 0.7, marginTop: "1px"}}, "\u23F1"),
+          e("p", null,
+            "Group-stage picks lock match by match \u2014 each one closes right when that game kicks off, so you can keep adjusting the rest anytime. Your knockout bracket, Golden Boot, and MVP picks lock all together when the knockout stage begins. If you're playing Quick Picks, that's everything you've entered.")
+        ),
 
-      // Join prompt (registration open only)
-      regOpen() && newName.trim() && !players.find(p => p.name.toLowerCase() === newName.trim().toLowerCase()) &&
-        e("div", {className: "mb-4"},
-          e("button", {
-            onClick: async () => { const p = await addPlayer(); if (p) requestLogin(p.id, p.name); },
-            className: "w-full py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-bold text-sm hover:shadow-lg transition flex items-center justify-center gap-2"
-          },
-            e("span", null, "+"),
-            "Join as \"" + newName.trim() + "\""
+        !whatsNewDismissed && e("div", {className: "wc-d-whatsnew mb-4"},
+          e("div", {className: "flex items-start justify-between gap-2 mb-2"},
+            e("span", {className: "wc-d-whatsnew-tag"}, "\u2728 What's new"),
+            e("button", {onClick: () => setWhatsNewDismissed(true), className: "wc-d-dim hover:text-white text-xs font-bold leading-none", style: {background: "none", border: "none", cursor: "pointer"}}, "\u2715")
+          ),
+          e("ul", {className: "text-xs space-y-1 list-disc pl-4", style: {color: "#d8d4ee"}},
+            e("li", null, "Joining is open the whole group stage now \u2014 jump in anytime before the knockouts start"),
+            e("li", null, "You can set a 3-digit PIN to stop others accidentally changing your picks"),
+            e("li", null, "Viewing a friend's picks is easier on mobile \u2014 a clear banner shows whose picks you're looking at"),
+            e("li", null, "The leaderboard now shows who everyone's backing to win it all"),
+            e("li", null, "A ticker at the bottom shows the latest results and leaderboard movement")
           )
         ),
 
-      e("div", {className: "flex items-center justify-between text-xs text-gray-400 border-t border-gray-100 pt-4"},
-        e("span", null, players.length + " player" + (players.length !== 1 ? "s" : "") + " registered"),
-        regOpen()
-          ? e("span", {className: "text-amber-600 font-semibold"}, "Joining open until knockouts begin (" + fmtKO(KNOCKOUT_LOCK) + ")")
-          : e("span", {className: "text-red-400 font-semibold"}, "Joining closed \u2014 knockout stage underway")
+        // Search / join input — dual purpose
+        e("div", {className: "wc-d-search relative mb-4"},
+          e("input", {
+            type: "text", value: newName,
+            onChange: ev => setNewName(ev.target.value),
+            onKeyPress: async ev => {
+              if (ev.key === "Enter" && regOpen() && newName.trim() && !players.find(p => p.name.toLowerCase() === newName.trim().toLowerCase())) {
+                const p = await addPlayer();
+                if (p) requestLogin(p.id, p.name);
+              }
+            },
+            placeholder: regOpen() ? "Search players or type your name to join…" : "Search players…"
+          }),
+          e("span", {className: "absolute left-3 top-1/2 -translate-y-1/2 wc-d-dim text-base"}, "\uD83D\uDD0D")
+        ),
+
+        // Player grid — alphabetical, champion-flag avatars
+        e("div", {className: "grid grid-cols-2 gap-2 mb-4"},
+          filtered.length > 0
+            ? filtered.map(p => {
+                const champ = getChampionPick(p.id, preds);
+                return e("button", {
+                  key: p.id,
+                  onClick: () => { setNewName(""); requestLogin(p.id, p.name); },
+                  className: "wc-d-pcard"
+                },
+                  e("span", {className: "wc-d-pavatar"}, champ ? getFlag(champ) : "\u2753"),
+                  e("span", {className: "wc-d-pname"}, p.name),
+                  p.pin && e("span", {className: "text-[11px] ml-auto opacity-45 flex-shrink-0"}, "\uD83D\uDD12")
+                );
+              })
+            : e("div", {className: "col-span-2 text-center py-4 text-sm wc-d-dim italic"},
+                newName.trim() ? "No player found \u2014 " + (regOpen() ? "press Enter to join as \"" + newName.trim() + "\"" : "joining is closed, knockouts have started") : "No players yet"
+              )
+        ),
+
+        // Join prompt (registration open only)
+        regOpen() && newName.trim() && !players.find(p => p.name.toLowerCase() === newName.trim().toLowerCase()) &&
+          e("div", {className: "mb-4"},
+            e("button", {
+              onClick: async () => { const p = await addPlayer(); if (p) requestLogin(p.id, p.name); },
+              className: "w-full py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-bold text-sm hover:shadow-lg transition flex items-center justify-center gap-2"
+            },
+              e("span", null, "+"),
+              "Join as \"" + newName.trim() + "\""
+            )
+          ),
+
+        e("div", {className: "wc-d-footerrow pt-4"},
+          e("span", null, players.length + " player" + (players.length !== 1 ? "s" : "") + " registered"),
+          regOpen()
+            ? e("span", {className: "wc-d-gold font-semibold"}, "Joining open until knockouts begin (" + fmtKO(KNOCKOUT_LOCK) + ")")
+            : e("span", {className: "font-semibold", style: {color: "#f06a7d"}}, "Joining closed \u2014 knockout stage underway")
+        )
       )
     );
   } else {

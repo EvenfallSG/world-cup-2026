@@ -505,9 +505,21 @@ function App() {
       }
     }
 
+    // Golden Boot race — real tournament top scorer(s), from football-data.org via our function
+    if (topScorers.length) {
+      const top = topScorers[0];
+      const tied = topScorers.filter(s => s.goals === top.goals);
+      const goalsLabel = top.goals === 1 ? "goal" : "goals";
+      if (tied.length > 1) {
+        items.push({icon: "\u26BD", text: "Golden Boot race: " + tied.length + "-way tie at " + top.goals + " " + goalsLabel + " \u2014 " + tied.map(s => s.name).join(", ")});
+      } else {
+        items.push({icon: "\u26BD", text: "Golden Boot leader: " + top.name + " (" + top.team + ") \u2014 " + top.goals + " " + goalsLabel});
+      }
+    }
+
     if (!items.length) items.push({icon: "\uD83D\uDCE3", text: "Tournament underway \u2014 check back once results start rolling in!"});
     return items;
-  }, [started, results, players, preds, nowTick]);
+  }, [started, results, players, preds, nowTick, topScorers]);
   useEffect(() => {
     if (tickerItems.length <= 1) return;
     const iv = setInterval(() => setTickerIdx(i => (i + 1) % tickerItems.length), 5000);
@@ -693,6 +705,27 @@ function App() {
   useEffect(() => {
     syncLiveScores();
     const iv = setInterval(syncLiveScores, 30 * 60 * 1000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // ---- GOLDEN BOOT live scorer stat (for the news ticker) ----
+  // Calls our own Netlify Function, never football-data.org directly — the
+  // function holds the real API key server-side. We just get back a clean
+  // { scorers: [{name, team, goals}, ...] } shape.
+  const [topScorers, setTopScorers] = useState([]);
+  useEffect(() => {
+    const loadScorers = async () => {
+      try {
+        const r = await fetch("/.netlify/functions/scorers");
+        if (!r.ok) return; // fail quietly — ticker just won't show this item
+        const data = await r.json();
+        if (Array.isArray(data.scorers)) setTopScorers(data.scorers);
+      } catch {
+        // network hiccup — ticker simply omits the scorer item until next try
+      }
+    };
+    loadScorers();
+    const iv = setInterval(loadScorers, 30 * 60 * 1000); // matches the score-sync cadence
     return () => clearInterval(iv);
   }, []);
 

@@ -99,6 +99,10 @@ button{transition:all .15s ease;}
 .bcentre-bronze{width:82%;margin-top:28px;margin-left:auto;margin-right:auto;opacity:0.9;}
 /* bracket flow connectors drawn by BracketLines SVG overlay */
 @keyframes tickerFade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
+@keyframes tickerScroll{0%{transform:translateX(0);}100%{transform:translateX(-100%);}}
+.ticker-track{display:inline-flex;align-items:center;gap:2.5rem;white-space:nowrap;will-change:transform;}
+.ticker-track.scrolling{animation:tickerScroll linear infinite;}
+.ticker-viewport{overflow:hidden;white-space:nowrap;width:100%;}
 /* ---- Leaderboard (Stadium Night) ---- */
 .lb-board{display:flex;flex-direction:column;gap:8px;}
 .lb-row{display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:15px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.035);transition:background .25s ease,border-color .25s ease,transform .2s ease;}
@@ -536,6 +540,49 @@ function calcStandings(pid, preds) {
   });
   const bestThirds = thirds.slice(0, 8);
   return {standings: st, qualified: q, bestThirds: bestThirds};
+}
+
+// Renders one ticker line. Measures its own text against the available width;
+// if it fits, it just sits still. If it's too long to read before the next
+// rotation, it scrolls smoothly left-to-right-then-wraps so nothing gets cut off.
+function TickerText({icon, text, tickerKey}) {
+  const viewportRef = React.useRef(null);
+  const textRef = React.useRef(null);
+  const [scrolling, setScrolling] = React.useState(false);
+  const [duration, setDuration] = React.useState(10);
+
+  React.useEffect(() => {
+    const measure = () => {
+      const vp = viewportRef.current, txt = textRef.current;
+      if (!vp || !txt) return;
+      const overflow = txt.scrollWidth > vp.clientWidth + 4; // small tolerance
+      setScrolling(overflow);
+      // Scale speed so longer text doesn't fly past unreadably fast (~60px/sec)
+      if (overflow) setDuration(Math.max(6, txt.scrollWidth / 60));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (viewportRef.current) ro.observe(viewportRef.current);
+    return () => ro.disconnect();
+  }, [text]);
+
+  const e = React.createElement;
+  // When scrolling, render the content twice back-to-back so the loop is seamless.
+  const content = e("span", {className: "flex items-center gap-2 flex-shrink-0"},
+    e("span", {className: "text-base flex-shrink-0"}, icon),
+    e("span", {className: "text-white text-xs md:text-sm font-semibold"}, text)
+  );
+  return e("div", {ref: viewportRef, className: "ticker-viewport"},
+    e("div", {
+      ref: textRef,
+      key: tickerKey,
+      className: "ticker-track" + (scrolling ? " scrolling" : ""),
+      style: scrolling ? {animationDuration: duration + "s"} : null
+    },
+      content,
+      scrolling && content // duplicate only when actually scrolling, for a seamless wrap
+    )
+  );
 }
 
 function App() {
@@ -2401,13 +2448,12 @@ function App() {
   },
     e("div", {className: "max-w-7xl mx-auto px-4 py-2 flex items-center gap-3"},
       e("div", {className: "flex-1 min-w-0 overflow-hidden"},
-        e("div", {
-          key: safeTickerIdx, // forces remount -> CSS animation replays on each rotation
-          className: "flex items-center gap-2 animate-[tickerFade_0.4s_ease]"
-        },
-          e("span", {className: "text-base flex-shrink-0"}, tickerItems[safeTickerIdx].icon),
-          e("span", {className: "text-white text-xs md:text-sm font-semibold truncate"}, tickerItems[safeTickerIdx].text)
-        )
+        e(TickerText, {
+          key: safeTickerIdx,
+          tickerKey: safeTickerIdx,
+          icon: tickerItems[safeTickerIdx].icon,
+          text: tickerItems[safeTickerIdx].text
+        })
       ),
       tickerItems.length > 1 && e("div", {className: "hidden sm:flex items-center gap-1 flex-shrink-0"},
         tickerItems.map((_, i) => e("span", {

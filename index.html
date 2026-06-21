@@ -612,6 +612,9 @@ function App() {
   const [lastSynced, setLastSynced] = useState(null);
   const recentEdits = useRef({});
   const saveTimer = useRef(null);
+  // Tracks whether the mobile "By Date" view has already auto-scrolled to today's
+  // matches this session, so it only happens once (not on every 8s poll re-render).
+  const dateScrolledRef = useRef(false);
 
   // ---- PIN protection state ----
   // pinStage: null | {id,name,mode} where mode = "enter" (ask for existing pin)
@@ -1438,10 +1441,31 @@ function App() {
           if (!byDay[lbl]) { byDay[lbl] = []; dayOrder.push(lbl); }
           byDay[lbl].push(m);
         });
+        // Figure out which day section is "current" so mobile users land there instead of
+        // always starting at Day 1 and having to scroll past everything already played.
+        // Preference order: today's section (if it has matches) > the most recently-passed
+        // day with matches > the soonest upcoming day (covers the case before kickoff).
+        const dayKickoff = lbl => Math.min(...byDay[lbl].map(m => KICKOFF[m.id]));
+        const dayKickoffEnd = lbl => Math.max(...byDay[lbl].map(m => KICKOFF[m.id])) + 3*60*60*1000; // ~3h match window
+        const todayLbl = new Date(nowTick).toLocaleDateString(undefined, {weekday: "long", day: "numeric", month: "long"});
+        let targetDay = dayOrder.find(d => d === todayLbl);
+        if (!targetDay) {
+          const past = dayOrder.filter(d => dayKickoffEnd(d) < nowTick);
+          targetDay = past.length ? past[past.length - 1] : dayOrder[0];
+        }
+        // Ref callback scrolls the target day's heading into view once, on mobile widths only —
+        // desktop's multi-column grid doesn't have the "buried under finished days" problem.
+        const scrollTargetIntoView = (el) => {
+          if (!el || dateScrolledRef.current) return;
+          if (typeof window !== "undefined" && window.innerWidth >= 768) return; // md breakpoint
+          dateScrolledRef.current = true;
+          // Small delay so layout has settled (cards, ticker bar, etc.) before scrolling.
+          setTimeout(() => el.scrollIntoView({block: "start"}), 50);
+        };
         matchesView = e("div", {className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"},
           dayOrder.map(d =>
-            e("div", {key: d},
-              e("h3", {className: "text-base font-bold text-blue-900 mb-3 bg-blue-100 rounded-lg px-3 py-2"}, d),
+            e("div", {key: d, ref: d === targetDay ? scrollTargetIntoView : null},
+              e("h3", {className: "text-base font-bold text-blue-900 mb-3 bg-blue-100 rounded-lg px-3 py-2" + (d === targetDay ? " ring-2 ring-amber-400" : "")}, d),
               byDay[d].map(m => matchRow(m, true))
             )
           )
@@ -1856,12 +1880,30 @@ function App() {
 
           // ---- MOBILE: simple stacked list, no horizontal scrolling needed ----
           // Same renderBMatch cards, just laid out vertically round-by-round with jump links.
+          // Each round's "d" labels (e.g. "Jun 28") are display strings, not real Date objects —
+          // parse them here (year is always 2026 for this tournament) so we can figure out which
+          // round is actually current and default mobile users straight into it, instead of always
+          // dropping them on Round of 32 once the tournament has moved on.
+          const MONTH_IDX = {Jun: 5, Jul: 6}; // JS month index (0-based)
+          const parseRoundDate = (label) => {
+            const [mon, day] = label.split(" ");
+            if (!(mon in MONTH_IDX)) return null;
+            return Date.UTC(2026, MONTH_IDX[mon], Number(day));
+          };
+          const roundDateRange = (matches) => {
+            const days = matches.map(m => parseRoundDate(m.d)).filter(Boolean);
+            if (!days.length) return null;
+            // End-of-day (23:59:59 UTC) on the last match's date, so a round stays "current"
+            // through the day its last match is played, not just up to midnight.
+            return {start: Math.min(...days), end: Math.max(...days) + 24*60*60*1000 - 1};
+          };
           const MOBILE_ROUNDS = [
-            {key:"r32", label:"Round of 32", render:() => [...P1_R32, ...P2_R32].map(id=>r32m(id))},
-            {key:"r16", label:"Round of 16", render:() => [...P1_R16, ...P2_R16].map(id=>kom(R16,id))},
-            {key:"qf",  label:"Quarter Finals", render:() => [...P1_QF, ...P2_QF].map(id=>kom(QF,id))},
-            {key:"sf",  label:"Semi Finals", render:() => [kom(SF,"M101"), kom(SF,"M102")]},
-            {key:"podium", label:"Bronze, Final & Podium", render:() => {
+            {key:"r32", label:"Round of 32", range: roundDateRange(R32), render:() => [...P1_R32, ...P2_R32].map(id=>r32m(id))},
+            {key:"r16", label:"Round of 16", range: roundDateRange(R16), render:() => [...P1_R16, ...P2_R16].map(id=>kom(R16,id))},
+            {key:"qf",  label:"Quarter Finals", range: roundDateRange(QF), render:() => [...P1_QF, ...P2_QF].map(id=>kom(QF,id))},
+            {key:"sf",  label:"Semi Finals", range: roundDateRange(SF), render:() => [kom(SF,"M101"), kom(SF,"M102")]},
+
+            {key:"podium", label:"Bronze, Final & Podium", range: roundDateRange([{d:"Jul 18"},{d:"Jul 19"}]), render:() => {
               const finalT1 = gKO("M101"), finalT2 = gKO("M102");
               const champ   = gKO("M104");
               const runner  = (champ&&finalT1&&finalT2) ? (champ===finalT1?finalT2:finalT1) : null;
@@ -1896,8 +1938,21 @@ function App() {
             }}
           ];
 
+          // Pick whichever round is "live" right now (today falls inside its date range).
+          // If we're in a gap between rounds (yesterday's round just finished, tomorrow's
+          // hasn't started), land on the round that just finished rather than jumping ahead —
+          // that's usually what people want to check first. Before the knockouts begin at all,
+          // fall back to Round of 32 as the sensible starting point.
+          const pickDefaultRound = () => {
+            const current = MOBILE_ROUNDS.find(r => r.range && nowTick >= r.range.start && nowTick <= r.range.end);
+            if (current) return current.key;
+            const ended = MOBILE_ROUNDS.filter(r => r.range && r.range.end < nowTick);
+            if (ended.length) return ended[ended.length - 1].key; // most recently finished
+            return MOBILE_ROUNDS[0].key; // tournament hasn't reached the knockouts yet
+          };
+
           const MobileBracket = () => {
-            const [activeRound, setActiveRound] = useState("r32");
+            const [activeRound, setActiveRound] = useState(pickDefaultRound);
             const current = MOBILE_ROUNDS.find(r => r.key === activeRound) || MOBILE_ROUNDS[0];
             return e("div", {className:"md:hidden"},
               e("div", {className:"flex gap-1.5 mb-4 overflow-x-auto pb-1", style:{scrollbarWidth:"none"}},

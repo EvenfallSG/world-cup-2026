@@ -99,6 +99,29 @@ button{transition:all .15s ease;}
 .bcentre-bronze{width:82%;margin-top:28px;margin-left:auto;margin-right:auto;opacity:0.9;}
 /* bracket flow connectors drawn by BracketLines SVG overlay */
 @keyframes tickerFade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:translateY(0);}}
+/* ---- Leaderboard (Stadium Night) ---- */
+.lb-board{display:flex;flex-direction:column;gap:8px;}
+.lb-row{display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:15px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.035);transition:background .25s ease,border-color .25s ease,transform .2s ease;}
+.lb-row:hover{background:rgba(255,255,255,.07);border-color:rgba(246,196,83,.30);transform:translateY(-1px);}
+.lb-row.me{border-color:rgba(246,196,83,.55);background:rgba(246,196,83,.09);}
+.lb-row.flash-up{animation:lbFlashUp 1.6s ease;}
+@keyframes lbFlashUp{0%{background:rgba(79,214,160,.40);border-color:rgba(79,214,160,.6);}100%{background:rgba(255,255,255,.035);}}
+.lb-medal{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800;flex-shrink:0;
+  box-shadow:inset 0 2px 5px rgba(255,255,255,.55),inset 0 -3px 7px rgba(0,0,0,.38),0 4px 11px rgba(0,0,0,.42);}
+.lb-medal.g{background:radial-gradient(circle at 36% 28%,#ffe89a,#f6c453 52%,#b07d12);color:#5a3d00;}
+.lb-medal.s{background:radial-gradient(circle at 36% 28%,#f7f9fc,#c8d0dc 52%,#828c9d);color:#2e3543;}
+.lb-medal.b{background:radial-gradient(circle at 36% 28%,#f3bd8c,#cd7f32 52%,#854a1b);color:#3d2207;}
+.lb-medal.n{background:rgba(255,255,255,.07);color:#7e8db0;font-size:15px;box-shadow:inset 0 1px 2px rgba(255,255,255,.12);}
+.lb-champflag{font-size:21px;line-height:1;flex-shrink:0;filter:drop-shadow(0 2px 3px rgba(0,0,0,.4));}
+.lb-name{font-size:15px;font-weight:700;color:#f2f4f8;background:none;border:none;padding:0;cursor:pointer;text-align:left;}
+.lb-name:hover{color:#f6c453;}
+.lb-sub{font-size:10.5px;color:#7e8db0;font-weight:600;margin-top:1px;}
+.lb-pts{font-size:24px;font-weight:800;color:#f6c453;font-variant-numeric:tabular-nums;line-height:1;}
+.lb-chip{font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;font-variant-numeric:tabular-nums;}
+.lb-facts{border-radius:16px;border:1px solid rgba(246,196,83,.22);background:linear-gradient(120deg,rgba(246,196,83,.10),rgba(167,139,250,.08));
+  padding:13px 18px;display:flex;align-items:center;gap:11px;min-height:50px;}
+.lb-facts .ic{font-size:20px;flex-shrink:0;}
+.lb-facts .tx{font-size:13.5px;font-weight:600;color:#eef1f7;line-height:1.4;}
 </style>
 </head>
 <body>
@@ -209,6 +232,42 @@ function calcAllScores(players, preds, results) {
     const s = calcPlayerScore(p.id, preds, results, players);
     return {...p, ...s};
   }).sort((a, b) => b.total - a.total);
+}
+
+// Light-hearted rotating one-liners for the leaderboard, in the app's CBF-button voice.
+// Pure: derives entirely from current standings + an optional "big mover" name flagged
+// by the rank-change effect. Returns [{icon, text}, ...]; the live screen rotates through them.
+function buildLeaderboardFacts(full, quick, hasResults, bigMover) {
+  const facts = [];
+  if (!hasResults) {
+    facts.push({icon: "\uD83D\uDD2E", text: "No results in yet \u2014 everyone's a tactical genius until kickoff."});
+    facts.push({icon: "\uD83C\uDFDF\uFE0F", text: "Board's all zeros. The calm before the bracket-shaped storm."});
+    return facts;
+  }
+  const board = full.length >= quick.length ? full : quick;
+  const leader = (full[0] && full[0].total > 0) ? full[0] : ((quick[0] && quick[0].total > 0) ? quick[0] : null);
+  if (leader) {
+    facts.push({icon: "\uD83D\uDC51", text: leader.name + " sits top of the pile. Savour it \u2014 form is temporary."});
+    facts.push({icon: "\uD83D\uDCC8", text: "Reigning overlord: " + leader.name + ". The rest of you, look busy."});
+  }
+  if (full.length > 1 && full[0].total > 0 && (full[0].total - full[1].total) <= 2) {
+    facts.push({icon: "\uD83D\uDD25", text: full[0].name + " and " + full[1].name + " are separated by a rounding error."});
+  }
+  if (board.length >= 3) {
+    const mid = board[Math.floor(board.length / 2)];
+    facts.push({icon: "\uD83E\uDD37", text: mid.name + ": gloriously, defiantly mid-table. No notes."});
+  }
+  if (board.length > 2) {
+    const last = board[board.length - 1];
+    facts.push({icon: "\uD83D\uDC22", text: last.name + " is taking the scenic route up the table. Slowly."});
+    facts.push({icon: "\uD83E\uDEE3", text: "Somebody's got to hold the floor up. Chin up, " + last.name + "."});
+  }
+  if (bigMover) {
+    facts.push({icon: "\uD83E\uDD16", text: bigMover + " just rocketed up the board. Definitely not using an AI. Definitely."});
+    facts.push({icon: "\uD83D\uDE80", text: "Suspiciously sharp climb from " + bigMover + ". We're watching you."});
+  }
+  if (!facts.length) facts.push({icon: "\u26BD", text: "Picks locked, results rolling \u2014 may the smuggest win."});
+  return facts;
 }
 
 const GT = {
@@ -617,6 +676,58 @@ function App() {
     return () => clearInterval(iv);
   }, [tickerItems.length]);
 
+  // ---- LEADERBOARD hooks ----
+  // Live at the top of App() (before the early returns for loading/live/setup/login) so the
+  // hook order never changes between renders. The `if (live)` block below only READS these.
+  const lbBoards = useMemo(() => {
+    if (!started) return {full: [], quick: []};
+    const scored = calcAllScores(players, preds, results);
+    return {
+      full:  scored.filter(p => effectiveMode(p.id, preds) !== "quick"),
+      quick: scored.filter(p => effectiveMode(p.id, preds) === "quick")
+    };
+  }, [started, players, preds, results]);
+  // String signature of the current ordering — stable across renders unless ranks actually move,
+  // so the flash effect only fires on a genuine position change (not on every 8s poll).
+  const lbRankSig = lbBoards.full.map(p => p.id).join(",") + "|" + lbBoards.quick.map(p => p.id).join(",");
+  const lbPrevRank = useRef({});
+  const [lbFlash, setLbFlash] = useState({});       // {id|"q:"+id: "up"} for rows that just climbed
+  const [lbBigMover, setLbBigMover] = useState(null); // name of anyone who jumped 3+ spots (for the AI-cheat quip)
+  const [lbFactIdx, setLbFactIdx] = useState(0);
+  useEffect(() => {
+    const newRank = {};
+    lbBoards.full.forEach((p, i) => { newRank[p.id] = i; });
+    lbBoards.quick.forEach((p, i) => { newRank["q:" + p.id] = i; });
+    const prev = lbPrevRank.current;
+    const flashes = {};
+    let mover = null;
+    Object.keys(newRank).forEach(k => {
+      if (prev[k] !== undefined && newRank[k] < prev[k]) {
+        flashes[k] = "up";
+        if (prev[k] - newRank[k] >= 3) {
+          const id = k.startsWith("q:") ? k.slice(2) : k;
+          const pl = players.find(x => x.id === id);
+          if (pl) mover = pl.name;
+        }
+      }
+    });
+    lbPrevRank.current = newRank;
+    const timers = [];
+    if (Object.keys(flashes).length) {
+      setLbFlash(flashes);
+      timers.push(setTimeout(() => setLbFlash({}), 1700));
+    }
+    if (mover) {
+      setLbBigMover(mover);
+      timers.push(setTimeout(() => setLbBigMover(null), 12000));
+    }
+    return () => timers.forEach(clearTimeout);
+  }, [lbRankSig]);
+  useEffect(() => {
+    const iv = setInterval(() => setLbFactIdx(i => i + 1), 6000);
+    return () => clearInterval(iv);
+  }, []);
+
   const persist = (key, val) => {
     setSaveStatus("saving");
     fbSetKey(key, val).then(ok => {
@@ -969,117 +1080,98 @@ function App() {
   }
 
   if (live) {
-    const scored = calcAllScores(players, preds, results);
     const hasResults = Object.keys(results).length > 0;
-    const medals = ["\uD83E\uDD47","\uD83E\uDD48","\uD83E\uDD49"];
-    const rankBg = ["bg-yellow-50","bg-gray-100","bg-orange-50"];
+    const fullPlayers  = lbBoards.full;
+    const quickPlayers = lbBoards.quick;
 
-    // Split by mode — comparing a Quick Pick's lower max ceiling against a Full Bracket
-    // player's much larger one on one combined table isn't a fair ranking, so two boards.
-    const fullPlayers  = scored.filter(p => effectiveMode(p.id, preds) !== "quick");
-    const quickPlayers = scored.filter(p => effectiveMode(p.id, preds) === "quick");
+    // A player's champion pick → drives the flag shown next to their name.
+    const champPick = (p) => {
+      const mode = effectiveMode(p.id, preds);
+      return (mode === "quick" ? preds[p.id + "-QP_WIN"] : preds[p.id + "-M104"]) || "";
+    };
 
-    const board = (title, icon, list, accent) => e("div", {className: "mb-10"},
-      e("div", {className: "flex items-center gap-3 mb-3 px-1"},
-        e("span", {className: "text-2xl"}, icon),
-        e("h2", {className: "text-white font-bold text-xl tracking-wide"}, title),
-        e("span", {className: "text-white/50 text-sm font-semibold"}, "(" + list.length + " player" + (list.length !== 1 ? "s" : "") + ")")
+    const facts = buildLeaderboardFacts(fullPlayers, quickPlayers, hasResults, lbBigMover);
+    const fact = facts.length ? facts[lbFactIdx % facts.length] : null;
+
+    const medalClass = ["g", "s", "b"];
+    const row = (p, i, isQuickBoard) => {
+      const isMe = p.id === pid;
+      const cf = champPick(p);
+      const flashKey = isQuickBoard ? ("q:" + p.id) : p.id;
+      const flashing = lbFlash[flashKey] === "up";
+      const br = p.breakdown || {};
+      const awards = (br.qpPoints || 0) + (br.awardPoints || 0);
+      const goToPicks = () => { if (!pid) return; switchView(p.id); setLive(false); };
+      return e("div", {key: p.id, className: "lb-row" + (isMe ? " me" : "") + (flashing ? " flash-up" : "")},
+        e("div", {className: "lb-medal " + (i < 3 ? medalClass[i] : "n")}, i + 1),
+        cf
+          ? e("span", {className: "lb-champflag", title: "Champion pick: " + cf}, getFlag(cf) || "\uD83C\uDFF3\uFE0F")
+          : e("span", {className: "lb-champflag", style: {opacity: .25}, title: "No champion pick yet"}, "\uD83C\uDFF3\uFE0F"),
+        e("div", {style: {flex: 1, minWidth: 0}},
+          pid
+            ? e("button", {className: "lb-name truncate", style: {maxWidth: "100%"}, onClick: goToPicks,
+                title: isMe ? "View my picks" : "View " + p.name + "'s picks"}, p.name + (isMe ? " (you)" : ""))
+            : e("div", {className: "lb-name truncate", style: {cursor: "default", maxWidth: "100%"}}, p.name),
+          e("div", {className: "lb-sub truncate"},
+            !hasResults ? "Awaiting first results\u2026" : (cf ? "Champion pick: " + cf : "No champion pick"))
+        ),
+        hasResults && e("div", {className: "hidden md:flex items-center gap-1.5"},
+          [["E", br.groupExact || 0, "rgba(79,214,160,.18)", "#7ef0c0"],
+           ["R", br.groupOutcome || 0, "rgba(99,179,237,.18)", "#9fd0ff"],
+           ["KO", br.koCorrect || 0, "rgba(167,139,250,.18)", "#cdbcff"],
+           ["AW", awards, "rgba(244,114,182,.18)", "#ffaede"]].map(([l, v, bg, col]) =>
+            e("span", {key: l, className: "lb-chip", style: {background: bg, color: col}}, l + " " + (v > 0 ? "+" + v : "0")))
+        ),
+        e("div", {className: "lb-pts", style: {minWidth: 46, textAlign: "right"}}, hasResults ? p.total : "\u2013")
+      );
+    };
+
+    const board = (title, icon, list, emptyMsg, isQuickBoard) => e("div", {className: "mb-7"},
+      e("div", {className: "flex items-center gap-2.5 mb-3 px-1"},
+        e("span", {className: "text-xl"}, icon),
+        e("h2", {className: "wc-d-white font-bold text-lg tracking-wide"}, title),
+        e("span", {className: "wc-d-dim text-xs font-semibold"}, "(" + list.length + " player" + (list.length !== 1 ? "s" : "") + ")")
       ),
       list.length === 0
-        ? e("div", {className: "bg-white/10 rounded-2xl p-6 text-center text-white/60 text-sm font-semibold"}, "No players in this mode yet")
-        : e("div", {className: "bg-white rounded-3xl shadow-2xl overflow-hidden"},
-            e("table", {className: "w-full border-collapse"},
-              e("thead", null,
-                e("tr", {className: "bg-gradient-to-r " + accent},
-                  e("th", {className: "py-4 px-4 text-white font-black text-xl text-left w-16"}, "#"),
-                  e("th", {className: "py-4 px-4 text-white font-black text-xl text-left"}, "Player"),
-                  e("th", {className: "py-4 px-4 text-amber-300 font-black text-2xl text-right"}, "Pts"),
-                  e("th", {className: "py-4 px-4 text-blue-200 font-bold text-sm text-right hidden md:table-cell"}, "Exact"),
-                  e("th", {className: "py-4 px-4 text-blue-200 font-bold text-sm text-right hidden md:table-cell"}, "Result"),
-                  e("th", {className: "py-4 px-4 text-blue-200 font-bold text-sm text-right hidden md:table-cell"}, "KO"),
-                  e("th", {className: "py-4 px-4 text-blue-200 font-bold text-sm text-right hidden md:table-cell"}, "Awards")
-                )
-              ),
-              e("tbody", null,
-                list.map((p, i) => {
-                  const isTop3 = i < 3;
-                  const isMe = p.id === pid;
-                  const goToPicks = () => {
-                    if (!pid) return; // not logged in — nothing sensible to jump to
-                    switchView(p.id);
-                    setLive(false);
-                  };
-                  return e("tr", {key: p.id,
-                    className: "border-b-2 border-gray-100 transition hover:bg-blue-50 " + (rankBg[i] || "")},
-                    e("td", {className: "px-4 py-5 text-3xl font-black text-blue-900 text-center"},
-                      isTop3 ? medals[i] : e("span", {className: "text-2xl text-gray-400"}, i + 1)),
-                    e("td", {className: "px-4 py-5"},
-                      pid
-                        ? e("button", {
-                            onClick: goToPicks,
-                            className: "text-2xl font-bold text-blue-900 hover:text-blue-600 hover:underline text-left",
-                            title: isMe ? "View my picks" : "View " + p.name + "'s picks (read-only)"
-                          }, p.name + (isMe ? " (you)" : ""))
-                        : e("span", {className: "text-2xl font-bold text-blue-900"}, p.name),
-                      !hasResults && e("div", {className: "text-xs text-gray-400 mt-0.5"}, "Waiting for first results…")
-                    ),
-                    e("td", {className: "px-4 py-5 text-right"},
-                      e("span", {className: "text-3xl font-black text-blue-900"}, hasResults ? p.total : "–")
-                    ),
-                    e("td", {className: "px-4 py-5 text-right text-lg font-bold text-emerald-600 hidden md:table-cell"},
-                      hasResults ? (p.breakdown.groupExact > 0 ? "+" + p.breakdown.groupExact : "–") : "–"),
-                    e("td", {className: "px-4 py-5 text-right text-lg font-bold text-blue-500 hidden md:table-cell"},
-                      hasResults ? (p.breakdown.groupOutcome > 0 ? "+" + p.breakdown.groupOutcome : "–") : "–"),
-                    e("td", {className: "px-4 py-5 text-right text-lg font-bold text-purple-600 hidden md:table-cell"},
-                      hasResults ? (p.breakdown.koCorrect > 0 ? "+" + p.breakdown.koCorrect : "–") : "–"),
-                    e("td", {className: "px-4 py-5 text-right text-lg font-bold text-pink-600 hidden md:table-cell"},
-                      hasResults ? ((p.breakdown.qpPoints + p.breakdown.awardPoints) > 0 ? "+" + (p.breakdown.qpPoints + p.breakdown.awardPoints) : "–") : "–")
-                  );
-                })
-              )
-            )
-          )
+        ? e("div", {className: "wc-d-card rounded-2xl p-5 text-center wc-d-dim text-sm font-semibold"}, emptyMsg)
+        : e("div", {className: "lb-board"}, list.map((p, i) => row(p, i, isQuickBoard)))
     );
 
-    return e("div", {className: "min-h-screen wc-bg p-6 md:p-10"},
-      e("div", {className: "max-w-5xl mx-auto"},
-        // Header
-        e("div", {className: "flex items-start justify-between mb-8"},
+    return e("div", {className: "min-h-screen wc-bg p-5 md:p-10"},
+      e("div", {className: "max-w-3xl mx-auto"},
+        e("div", {className: "flex items-center justify-between mb-6 gap-3"},
           e("button", {onClick: () => setLive(false),
-            className: "px-5 py-2.5 bg-white/15 hover:bg-white/25 text-white text-sm font-bold rounded-xl border border-white/20 transition flex items-center gap-2"
+            className: "px-4 py-2 wc-d-card rounded-xl wc-d-white text-sm font-bold border border-white/15 hover:border-white/30 transition flex-shrink-0"
           }, "\u2190 Back"),
-          e("div", {className: "text-center flex-1"},
-            e("h1", {className: "wc-title text-5xl md:text-7xl text-white mb-2"}, "LEADERBOARD"),
-            e("div", {className: "inline-flex items-center gap-2 bg-emerald-500/20 border border-emerald-400/40 rounded-full px-4 py-1.5"},
-              e("div", {className: "w-2 h-2 rounded-full bg-emerald-400 animate-pulse"}),
-              e("span", {className: "text-emerald-200 text-sm font-bold tracking-widest uppercase"}, "Live · auto-updates every 8s")
-            )
+          e("div", {className: "text-center flex-1 min-w-0"},
+            e("h1", {className: "wc-title text-4xl md:text-6xl wc-d-white", style: {marginBottom: 4}}, "LEADERBOARD"),
+            e("span", {className: "wc-d-eyebrow"}, e("span", {className: "dot"}), "Live \u00b7 updates every 8s")
           ),
-          e("div", {className: "w-24"}) // spacer to keep title centred
+          e("div", {className: "w-16 flex-shrink-0"})
         ),
 
-        // Scoring legend
-        e("div", {className: "bg-white/10 backdrop-blur rounded-2xl p-4 mb-6 flex flex-wrap gap-3 justify-center text-xs font-bold"},
-          e("span", {className: "text-white/70 mr-1 self-center"}, "Scoring:"),
-          [["Exact score","3 pts","bg-emerald-500/70"],["Correct result","1 pt","bg-blue-500/70"],
-           ["KO winner","2 pts","bg-purple-500/70"],["Champion","5 pts","bg-yellow-500/70"],
-           ["Runner-up","3 pts","bg-amber-400/70"],["3rd/4th","2/1 pts","bg-orange-400/70"],
-           ["Boot/MVP","3 pts ea","bg-pink-500/70"]].map(([l,v,bg]) =>
-            e("span", {key:l, className: "flex items-center gap-1.5 px-3 py-1 rounded-full text-white " + bg},
-              e("span", null, l), e("span", {className: "font-bold opacity-90"}, v))
-          )
+        fact && e("div", {className: "lb-facts mb-6"},
+          e("span", {key: "i" + lbFactIdx, className: "ic animate-[tickerFade_0.4s_ease]"}, fact.icon),
+          e("span", {key: "t" + lbFactIdx, className: "tx animate-[tickerFade_0.4s_ease]"}, fact.text)
         ),
 
-        board("Full Bracket", "\uD83C\uDFC6", fullPlayers, "from-blue-900 to-teal-800"),
-        board("Quick Picks", "\u26A1", quickPlayers, "from-amber-600 to-orange-700"),
+        e("div", {className: "wc-d-card rounded-2xl p-3.5 mb-6 flex flex-wrap gap-2 justify-center text-[11px] font-bold"},
+          e("span", {className: "wc-d-dim mr-1 self-center"}, "Scoring:"),
+          [["Exact", "3", "rgba(79,214,160,.18)", "#7ef0c0"], ["Result", "1", "rgba(99,179,237,.18)", "#9fd0ff"],
+           ["KO", "2", "rgba(167,139,250,.18)", "#cdbcff"], ["Champion", "5", "rgba(246,196,83,.18)", "#f6c453"],
+           ["Runner-up", "3", "rgba(245,158,11,.18)", "#fcd34d"], ["3rd/4th", "2/1", "rgba(251,146,60,.18)", "#fdba74"],
+           ["Boot/MVP", "3 ea", "rgba(244,114,182,.18)", "#ffaede"]].map(([l, v, bg, col]) =>
+            e("span", {key: l, className: "lb-chip", style: {background: bg, color: col, padding: "3px 9px"}}, l + " " + v))
+        ),
 
-        // Matches played counter
+        board("Full Bracket", "\uD83C\uDFC6", fullPlayers, "No Full Bracket players yet", false),
+        board("Quick Picks", "\u26A1", quickPlayers, "No Quick Picks players yet", true),
+
         hasResults && (() => {
           const played = GM.filter(m => results[m.id]).length;
-          const koPlayed = [...R32,...R16,...QF,...SF,{id:"M103"},{id:"M104"}].filter(m => results[m.id]).length;
-          return e("div", {className: "mt-2 text-center text-white/60 text-sm font-semibold"},
-            played + " group matches + " + koPlayed + " knockout matches with results entered"
-          );
+          const koPlayed = [...R32, ...R16, ...QF, ...SF, {id: "M103"}, {id: "M104"}].filter(m => results[m.id]).length;
+          return e("div", {className: "mt-1 text-center wc-d-dim text-xs font-semibold"},
+            played + " group matches \u00b7 " + koPlayed + " knockout matches scored");
         })()
       )
     );

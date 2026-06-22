@@ -241,37 +241,140 @@ function calcAllScores(players, preds, results) {
 // Light-hearted rotating one-liners for the leaderboard, in the app's CBF-button voice.
 // Pure: derives entirely from current standings + an optional "big mover" name flagged
 // by the rank-change effect. Returns [{icon, text}, ...]; the live screen rotates through them.
-function buildLeaderboardFacts(full, quick, hasResults, bigMover) {
-  const facts = [];
+// ============================================================================
+// SHARED HUMOUR BANK — feeds both the Leaderboard screen's fact strip and the
+// bottom ticker, independently rotating but drawing from one pool. Pure
+// functions, no React/DOM deps, so this block ports cleanly to future
+// prediction apps (EPL, Euros) without rewriting.
+//
+// Voice: dry, affectionately roasting, character-driven with named players.
+// Tiers: leader (rare), chasers/midtable (dominant — most players live here),
+// stragglers (~20% minority), bigMover/goldenBoot (event-driven, only appear
+// when there's real news to report), noResults/fallback.
+// ============================================================================
+function buildHumourBank(full, quick, hasResults, bigMover, topScorers) {
+  const bank = [];
+  const push = (tier, icon, text) => bank.push({tier, icon, text});
+
   if (!hasResults) {
-    facts.push({icon: "\uD83D\uDD2E", text: "No results in yet \u2014 everyone's a tactical genius until kickoff."});
-    facts.push({icon: "\uD83C\uDFDF\uFE0F", text: "Board's all zeros. The calm before the bracket-shaped storm."});
-    return facts;
+    push("noResults", "\uD83D\uDD2E", "No results in yet \u2014 everyone's a tactical genius until kickoff.");
+    push("noResults", "\uD83C\uDFDF\uFE0F", "Board's all zeros. The calm before the bracket-shaped storm.");
+    push("noResults", "\uD83E\uDD10", "Every prediction currently looks brilliant. Enjoy the high.");
+    push("noResults", "\uD83D\uDCDD", "Picks are locked in. Confidence levels: dangerously high.");
+    push("noResults", "\u23F3", "Nobody's wrong yet. Cherish this rare moment of universal genius.");
+    return bank;
   }
+
   const board = full.length >= quick.length ? full : quick;
   const leader = (full[0] && full[0].total > 0) ? full[0] : ((quick[0] && quick[0].total > 0) ? quick[0] : null);
+
+  // ---- LEADER (rare tier) ----
   if (leader) {
-    facts.push({icon: "\uD83D\uDC51", text: leader.name + " sits top of the pile. Savour it \u2014 form is temporary."});
-    facts.push({icon: "\uD83D\uDCC8", text: "Reigning overlord: " + leader.name + ". The rest of you, look busy."});
+    push("leader", "\uD83D\uDC51", leader.name + " sits top of the pile. Savour it \u2014 form is temporary.");
+    push("leader", "\uD83D\uDCC8", "Reigning overlord: " + leader.name + ". The rest of you, look busy.");
+    push("leader", "\uD83D\uDC51", leader.name + " is currently insufferably smug, and frankly, earned it.");
+    push("leader", "\uD83C\uDFC6", "Somewhere, " + leader.name + " is enjoying this way more than is healthy.");
+    push("leader", "\uD83D\uDE0E", leader.name + " peaked early. Historically, this never ends well for anyone.");
   }
+
+  // ---- CHASERS (dominant tier: top half, not the leader) ----
   if (full.length > 1 && full[0].total > 0 && (full[0].total - full[1].total) <= 2) {
-    facts.push({icon: "\uD83D\uDD25", text: full[0].name + " and " + full[1].name + " are separated by a rounding error."});
+    push("chasers", "\uD83D\uDD25", full[0].name + " and " + full[1].name + " are separated by a rounding error.");
   }
+  if (board.length >= 4) {
+    const chaser = board[1];
+    push("chasers", "\uD83D\uDC40", chaser.name + " is lurking just behind the leader, plotting quietly.");
+    push("chasers", "\u26A1", chaser.name + " is one good knockout round from causing real chaos.");
+    push("chasers", "\uD83E\uDDEE", chaser.name + " is the definition of \"Fine, I guess\" \u2014 close enough to matter.");
+  }
+  if (board.length >= 5) {
+    const c2 = board[2];
+    push("chasers", "\uD83D\uDC0D", c2.name + " is quietly climbing while everyone watches the top two argue.");
+    push("chasers", "\uD83C\uDFAF", c2.name + " has entered \"dangerously competent\" territory.");
+  }
+
+  // ---- MID-TABLE (dominant tier, victim rotation across the middle band) ----
   if (board.length >= 3) {
-    const mid = board[Math.floor(board.length / 2)];
-    facts.push({icon: "\uD83E\uDD37", text: mid.name + ": gloriously, defiantly mid-table. No notes."});
+    const midStart = Math.max(1, Math.floor(board.length * 0.35));
+    const midEnd = Math.min(board.length - 2, Math.ceil(board.length * 0.65));
+    const midBand = board.slice(midStart, midEnd + 1);
+    const mid = midBand.length ? midBand[Math.floor(midBand.length / 2)] : board[Math.floor(board.length / 2)];
+    push("midtable", "\uD83E\uDD37", mid.name + ": gloriously, defiantly mid-table. No notes.");
+    push("midtable", "\uD83D\uDCCA", mid.name + " has achieved perfect, undisturbed mediocrity.");
+    push("midtable", "\uD83E\uDED1", mid.name + " is neither here nor there, and seems fine with it.");
+    if (midBand.length > 1) {
+      const mid2 = midBand[midBand.length - 1] !== mid ? midBand[midBand.length - 1] : midBand[0];
+      push("midtable", "\uD83C\uDFAA", mid2.name + " is riding the carousel of mid-table anonymity.");
+      push("midtable", "\uD83D\uDD70\uFE0F", mid2.name + " could move three places either way and nobody would notice.");
+    }
   }
+
+  // ---- STRAGGLERS (~20% tier, victim rotation among bottom 2-3) ----
   if (board.length > 2) {
     const last = board[board.length - 1];
-    facts.push({icon: "\uD83D\uDC22", text: last.name + " is taking the scenic route up the table. Slowly."});
-    facts.push({icon: "\uD83E\uDEE3", text: "Somebody's got to hold the floor up. Chin up, " + last.name + "."});
+    push("stragglers", "\uD83D\uDC22", last.name + " is taking the scenic route up the table. Slowly.");
+    push("stragglers", "\uD83E\uDEE3", "Somebody's got to hold the floor up. Chin up, " + last.name + ".");
+    push("stragglers", "\uD83E\uDEA6", last.name + " is dead last and proud. Mostly proud.");
+    push("stragglers", "\uD83D\uDCC9", last.name + " has found the one direction the table doesn't go: up.");
   }
+  if (board.length > 3) {
+    const secondLast = board[board.length - 2];
+    push("stragglers", "\uD83D\uDC22", secondLast.name + " is second-to-last and treating it like a podium finish.");
+    push("stragglers", "\uD83E\uDD7A", secondLast.name + " is one bad round from real trouble.");
+  }
+
+  // ---- BIG MOVER (event-driven) ----
   if (bigMover) {
-    facts.push({icon: "\uD83E\uDD16", text: bigMover + " just rocketed up the board. Definitely not using an AI. Definitely."});
-    facts.push({icon: "\uD83D\uDE80", text: "Suspiciously sharp climb from " + bigMover + ". We're watching you."});
+    push("bigMover", "\uD83E\uDD16", bigMover + " just rocketed up the board. Definitely not using an AI. Definitely.");
+    push("bigMover", "\uD83D\uDE80", "Suspiciously sharp climb from " + bigMover + ". We're watching you.");
+    push("bigMover", "\uD83D\uDCA5", bigMover + " woke up and chose violence on the leaderboard today.");
   }
-  if (!facts.length) facts.push({icon: "\u26BD", text: "Picks locked, results rolling \u2014 may the smuggest win."});
-  return facts;
+
+  // ---- GOLDEN BOOT (event-driven, real data via football-data.org) ----
+  if (topScorers && topScorers.length) {
+    const top = topScorers[0];
+    const tied = topScorers.filter(s => s.goals === top.goals);
+    const goalsLabel = top.goals === 1 ? "goal" : "goals";
+    if (tied.length > 1) {
+      push("goldenBoot", "\u26BD", "Golden Boot race: " + tied.length + "-way tie at " + top.goals + " " + goalsLabel + " \u2014 " + tied.map(s => s.name).join(", "));
+    } else {
+      push("goldenBoot", "\u26BD", "Golden Boot leader: " + top.name + " (" + top.team + ") \u2014 " + top.goals + " " + goalsLabel);
+    }
+  }
+
+  if (!bank.length) push("fallback", "\u26BD", "Picks locked, results rolling \u2014 may the smuggest win.");
+  return bank;
+}
+
+// Tier weighting for weighted-random selection. Leader rare, chasers/midtable
+// dominant, stragglers a clear ~20% minority, event-driven tiers weighted high
+// (they're only ever in the bank when there's real news).
+const HUMOUR_TIER_WEIGHT = {
+  leader: 1, chasers: 3, midtable: 3, stragglers: 1.2,
+  bigMover: 2.5, goldenBoot: 2.5, noResults: 1, fallback: 1
+};
+
+// Weighted-random pick with no-immediate-repeat protection, tracked per surface
+// (so the ticker and the Leaderboard screen rotate independently without ever
+// repeating their own immediately-prior line).
+function pickHumourLine(bank, lastShownRef, surfaceKey) {
+  if (!bank.length) return null;
+  const lastText = lastShownRef.current[surfaceKey];
+  let pool = bank;
+  if (bank.length > 1 && lastText) {
+    const filtered = bank.filter(b => b.text !== lastText);
+    if (filtered.length) pool = filtered;
+  }
+  const weights = pool.map(b => HUMOUR_TIER_WEIGHT[b.tier] || 1);
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  let chosen = pool[0];
+  for (let i = 0; i < pool.length; i++) {
+    r -= weights[i];
+    if (r <= 0) { chosen = pool[i]; break; }
+  }
+  lastShownRef.current[surfaceKey] = chosen.text;
+  return chosen;
 }
 
 const GT = {
@@ -404,7 +507,7 @@ const KICKOFF = {
   K2:KOT(17,17), L1:KOT(17,20), L2:KOT(17,23), K1:KOT(18,2),
   A6:KOT(18,16), B4:KOT(18,19), B3:KOT(18,22), A5:KOT(19,1),
   D3:KOT(19,19), C6:KOT(19,22), C5:KOT(20,0,30), D4:KOT(20,3),
-  F5:KOT(20,17), E5:KOT(20,20), E6:KOT(21,0),  F6:KOT(21,2),
+  F5:KOT(20,17), E5:KOT(20,20), E6:KOT(21,0),  F6:KOT(21,4),
   H3:KOT(21,16), G5:KOT(21,19), H4:KOT(21,22), G6:KOT(22,1),
   J5:KOT(22,17), I5:KOT(22,21), I6:KOT(23,0),  J6:KOT(23,3),
   K4:KOT(23,17), L5:KOT(23,20), L6:KOT(23,23), K3:KOT(24,2),
@@ -666,69 +769,10 @@ function App() {
     return () => clearInterval(iv);
   }, []);
 
-  // ---- TICKER TAPE hooks ----
-  // These must live before any early `return` below (loading/live/setup/login/mode-choice screens
-  // each return early) so the hook count stays identical on every render — calling hooks after an
-  // early return is what crashes React with "Rendered more hooks than during the previous render."
-  const [tickerIdx, setTickerIdx] = useState(0);
-  const [tickerHidden, setTickerHidden] = useState(false);
-  const tickerItems = useMemo(() => {
-    if (!started) return [];
-    const items = [];
-
-    // Most recent group result with a kickoff time (so we can find the latest chronologically)
-    const playedGroup = GM.filter(m => results[m.id] && KICKOFF[m.id]);
-    if (playedGroup.length) {
-      const latest = playedGroup.slice().sort((a, b) => KICKOFF[b.id] - KICKOFF[a.id])[0];
-      items.push({icon: "\uD83C\uDFC1", text: latest.t1 + " " + results[latest.id].replace("-", " - ") + " " + latest.t2 + " \u00b7 Full Time"});
-    }
-
-    // Next upcoming kickoff (group stage)
-    const upcoming = GM.filter(m => KICKOFF[m.id] && KICKOFF[m.id] > nowTick).sort((a, b) => KICKOFF[a.id] - KICKOFF[b.id])[0];
-    if (upcoming) {
-      items.push({icon: "\u23F1", text: "Next: " + upcoming.t1 + " vs " + upcoming.t2 + " \u00b7 " + fmtKO(KICKOFF[upcoming.id])});
-    }
-
-    // Leaderboard leaders, split by mode (only once at least one player has scored)
-    if (players.length) {
-      const scored = calcAllScores(players, preds, results);
-      const fullBoard  = scored.filter(p => effectiveMode(p.id, preds) !== "quick" && effectiveMode(p.id, preds) !== null);
-      const quickBoard = scored.filter(p => effectiveMode(p.id, preds) === "quick");
-      if (fullBoard.length && fullBoard[0].total > 0) {
-        items.push({icon: "\uD83D\uDC51", text: "Leading Full Bracket: " + fullBoard[0].name + " \u2014 " + fullBoard[0].total + " pts"});
-        if (fullBoard.length > 1 && (fullBoard[0].total - fullBoard[1].total) <= 3) {
-          items.push({icon: "\uD83D\uDD25", text: "Tight race: " + fullBoard[0].name + " & " + fullBoard[1].name + " separated by " + (fullBoard[0].total - fullBoard[1].total) + " pt" + ((fullBoard[0].total - fullBoard[1].total) === 1 ? "" : "s")});
-        }
-      }
-      if (quickBoard.length && quickBoard[0].total > 0) {
-        items.push({icon: "\u26A1", text: "Leading Quick Picks: " + quickBoard[0].name + " \u2014 " + quickBoard[0].total + " pts"});
-      }
-    }
-
-    // Golden Boot race — real tournament top scorer(s), from football-data.org via our function
-    if (topScorers.length) {
-      const top = topScorers[0];
-      const tied = topScorers.filter(s => s.goals === top.goals);
-      const goalsLabel = top.goals === 1 ? "goal" : "goals";
-      if (tied.length > 1) {
-        items.push({icon: "\u26BD", text: "Golden Boot race: " + tied.length + "-way tie at " + top.goals + " " + goalsLabel + " \u2014 " + tied.map(s => s.name).join(", ")});
-      } else {
-        items.push({icon: "\u26BD", text: "Golden Boot leader: " + top.name + " (" + top.team + ") \u2014 " + top.goals + " " + goalsLabel});
-      }
-    }
-
-    if (!items.length) items.push({icon: "\uD83D\uDCE3", text: "Tournament underway \u2014 check back once results start rolling in!"});
-    return items;
-  }, [started, results, players, preds, nowTick, topScorers]);
-  useEffect(() => {
-    if (tickerItems.length <= 1) return;
-    const iv = setInterval(() => setTickerIdx(i => (i + 1) % tickerItems.length), 5000);
-    return () => clearInterval(iv);
-  }, [tickerItems.length]);
-
   // ---- LEADERBOARD hooks ----
-  // Live at the top of App() (before the early returns for loading/live/setup/login) so the
-  // hook order never changes between renders. The `if (live)` block below only READS these.
+  // Moved above the ticker hooks (next block) because tickerItems' useMemo now references
+  // lbBigMover for the shared humour bank — hooks must be initialized before use within the
+  // same render pass. Still lives before any early return so hook order stays stable.
   const lbBoards = useMemo(() => {
     if (!started) return {full: [], quick: []};
     const scored = calcAllScores(players, preds, results);
@@ -775,6 +819,79 @@ function App() {
   }, [lbRankSig]);
   useEffect(() => {
     const iv = setInterval(() => setLbFactIdx(i => i + 1), 6000);
+    return () => clearInterval(iv);
+  }, []);
+
+  // ---- TICKER TAPE hooks ----
+  // These must live before any early `return` below (loading/live/setup/login/mode-choice screens
+  // each return early) so the hook count stays identical on every render — calling hooks after an
+  // early return is what crashes React with "Rendered more hooks than during the previous render."
+  const [tickerIdx, setTickerIdx] = useState(0);
+  const [tickerHidden, setTickerHidden] = useState(false);
+  // Tracks the last-shown humour line per surface ("ticker" / "leaderboard") so
+  // neither surface ever repeats its own immediately-prior line. Shared module-level
+  // bank, independent rotation — see buildHumourBank/pickHumourLine above.
+  const humourLastShown = useRef({});
+  // Caches the Leaderboard screen's currently-picked humour line, keyed by lbFactIdx,
+  // so re-renders that aren't an actual rotation tick (8s data poll, nowTick ticking)
+  // don't cause pickHumourLine to be called — and its no-repeat tracking mutated —
+  // more often than the visible 6s rotation. Declared here (not inside the `if (live)`
+  // block) since it's a ref, not state, but still needs to exist before that block reads it.
+  const lbFactCache = useRef({idx: -1, fact: null});
+  const [tickerHumourTick, setTickerHumourTick] = useState(0); // bump to force a fresh humour pick
+  const tickerItems = useMemo(() => {
+    if (!started) return [];
+    const items = [];
+
+    // Most recent group result with a kickoff time (so we can find the latest chronologically)
+    const playedGroup = GM.filter(m => results[m.id] && KICKOFF[m.id]);
+    if (playedGroup.length) {
+      const latest = playedGroup.slice().sort((a, b) => KICKOFF[b.id] - KICKOFF[a.id])[0];
+      items.push({icon: "\uD83C\uDFC1", text: latest.t1 + " " + results[latest.id].replace("-", " - ") + " " + latest.t2 + " \u00b7 Full Time"});
+    }
+
+    // Next upcoming kickoff (group stage)
+    const upcoming = GM.filter(m => KICKOFF[m.id] && KICKOFF[m.id] > nowTick).sort((a, b) => KICKOFF[a.id] - KICKOFF[b.id])[0];
+    if (upcoming) {
+      items.push({icon: "\u23F1", text: "Next: " + upcoming.t1 + " vs " + upcoming.t2 + " \u00b7 " + fmtKO(KICKOFF[upcoming.id])});
+    }
+
+    // Leaderboard leaders, split by mode (only once at least one player has scored) —
+    // factual "who's leading + by how much" line stays separate from the humour bank,
+    // since this is a hard stat rather than a joke.
+    let fullBoardScored = [], quickBoardScored = [];
+    if (players.length) {
+      const scored = calcAllScores(players, preds, results);
+      fullBoardScored  = scored.filter(p => effectiveMode(p.id, preds) !== "quick" && effectiveMode(p.id, preds) !== null);
+      quickBoardScored = scored.filter(p => effectiveMode(p.id, preds) === "quick");
+      if (fullBoardScored.length && fullBoardScored[0].total > 0) {
+        items.push({icon: "\uD83D\uDC51", text: "Leading Full Bracket: " + fullBoardScored[0].name + " \u2014 " + fullBoardScored[0].total + " pts"});
+      }
+      if (quickBoardScored.length && quickBoardScored[0].total > 0) {
+        items.push({icon: "\u26A1", text: "Leading Quick Picks: " + quickBoardScored[0].name + " \u2014 " + quickBoardScored[0].total + " pts"});
+      }
+    }
+
+    // Rotating humour line — shared bank with the Leaderboard screen, independent
+    // rotation tracked via humourLastShown.current.ticker. Re-picks whenever
+    // tickerHumourTick is bumped (own timer below) or the board genuinely changes.
+    const hasResultsForHumour = Object.keys(results).length > 0;
+    const humourBank = buildHumourBank(fullBoardScored, quickBoardScored, hasResultsForHumour, lbBigMover, topScorers);
+    const humourLine = pickHumourLine(humourBank, humourLastShown, "ticker");
+    if (humourLine) items.push(humourLine);
+
+    if (!items.length) items.push({icon: "\uD83D\uDCE3", text: "Tournament underway \u2014 check back once results start rolling in!"});
+    return items;
+  }, [started, results, players, preds, nowTick, topScorers, tickerHumourTick, lbBigMover]);
+  useEffect(() => {
+    if (tickerItems.length <= 1) return;
+    const iv = setInterval(() => setTickerIdx(i => (i + 1) % tickerItems.length), 5000);
+    return () => clearInterval(iv);
+  }, [tickerItems.length]);
+  // Re-roll the ticker's humour line independently every ~18s (slower than the ticker's
+  // own 5s rotation through items, so the joke doesn't feel like it's racing the facts).
+  useEffect(() => {
+    const iv = setInterval(() => setTickerHumourTick(t => t + 1), 18000);
     return () => clearInterval(iv);
   }, []);
 
@@ -1140,8 +1257,19 @@ function App() {
       return (mode === "quick" ? preds[p.id + "-QP_WIN"] : preds[p.id + "-M104"]) || "";
     };
 
-    const facts = buildLeaderboardFacts(fullPlayers, quickPlayers, hasResults, lbBigMover);
-    const fact = facts.length ? facts[lbFactIdx % facts.length] : null;
+    // Plain function call (NOT a hook) — this sits inside the `if (live)` conditional block,
+    // so no hooks can live here without breaking hook order across renders. Instead we cache
+    // the picked line in a ref, keyed by lbFactIdx, so it only changes when the 6s rotation
+    // timer actually advances — not on every render this screen happens to re-render for
+    // (e.g. the 8s poll, or nowTick ticking once a second while the leaderboard is open).
+    let fact;
+    if (lbFactCache.current.idx === lbFactIdx) {
+      fact = lbFactCache.current.fact;
+    } else {
+      const bank = buildHumourBank(fullPlayers, quickPlayers, hasResults, lbBigMover, topScorers);
+      fact = pickHumourLine(bank, humourLastShown, "leaderboard");
+      lbFactCache.current = {idx: lbFactIdx, fact};
+    }
 
     const medalClass = ["g", "s", "b"];
     const row = (p, i, isQuickBoard) => {

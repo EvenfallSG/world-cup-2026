@@ -688,6 +688,344 @@ function TickerText({icon, text, tickerKey}) {
   );
 }
 
+// ---- BRACKET DISPLAY COMPONENTS (module scope) ----
+// These used to be defined INSIDE the "bracket" tab's per-render IIFE in App(), which meant
+// every poll/tick/edit recreated them as brand-new function references. React treats a changed
+// component function as a different component TYPE at that position, so even with a stable
+// `key` it fully unmounts and remounts — wiping MobileBracket's `activeRound` state back to its
+// default every ~8s and snapping mobile users back to Round of 32 mid-browse. Desktop suffered a
+// quieter version of the same bug (BracketWrap/BracketLines remounting, briefly losing/rebuilding
+// the SVG connector overlay). Lifting these to module scope keeps the component identity stable
+// across renders; only the *props* (which close over live state like slots/results/preds) change
+// each render, which is the normal and safe way for React content to update.
+
+const R32_P1_IDS = ["M74","M77","M73","M75","M83","M84","M81","M82"];
+const R32_P2_IDS = ["M76","M78","M79","M80","M86","M88","M85","M87"];
+const R16_P1_IDS = ["M89","M90","M93","M94"];
+const R16_P2_IDS = ["M91","M92","M95","M96"];
+const QF_P1_IDS  = ["M97","M98"];
+const QF_P2_IDS  = ["M99","M100"];
+
+// Each round's "d" labels (e.g. "Jun 28") are display strings, not real Date objects —
+// parse them here (year is always 2026 for this tournament) so we can figure out which
+// round is actually current and default mobile users straight into it, instead of always
+// dropping them on Round of 32 once the tournament has moved on.
+const ROUND_MONTH_IDX = {Jun: 5, Jul: 6}; // JS month index (0-based)
+function parseRoundDate(label) {
+  const [mon, day] = label.split(" ");
+  if (!(mon in ROUND_MONTH_IDX)) return null;
+  return Date.UTC(2026, ROUND_MONTH_IDX[mon], Number(day));
+}
+function roundDateRange(matches) {
+  const days = matches.map(m => parseRoundDate(m.d)).filter(Boolean);
+  if (!days.length) return null;
+  // End-of-day (23:59:59 UTC) on the last match's date, so a round stays "current"
+  // through the day its last match is played, not just up to midnight.
+  return {start: Math.min(...days), end: Math.max(...days) + 24*60*60*1000 - 1};
+}
+
+const eGlobal = React.createElement;
+
+// SVG overlay: measures real .bmatch positions, draws arrows with correct tips.
+// Self-contained — only depends on its own refs and internal state, so it never needed
+// to live inside the per-render IIFE in the first place.
+function BracketLines({wrapRef, centreRef}) {
+  const [segs, setSegs] = React.useState([]);
+  React.useEffect(() => {
+    const draw = () => {
+      const wrap = wrapRef.current;
+      const centre = centreRef.current;
+      if (!wrap) return;
+      const wr = wrap.getBoundingClientRect();
+      const allCols = Array.from(wrap.querySelectorAll(".bcol"));
+      const colCards = allCols.map(col =>
+        Array.from(col.querySelectorAll(".bmatch")).map(c => {
+          const r = c.getBoundingClientRect();
+          return {xR:r.right-wr.left, xL:r.left-wr.left, y:r.top-wr.top+r.height/2};
+        })
+      );
+      // col indices: 0=P1_R32(8), 1=P1_R16(4), 2=P1_QF(2), 3=P1_SF(1),
+      //              [centre .bcentre not .bcol]
+      //              4=P2_SF(1), 5=P2_QF(2), 6=P2_R16(4), 7=P2_R32(8)
+
+      // ── Align Final card midpoint with SF card midpoint ─────────────
+      // With align-items:center, the SF card sits at the vertical middle of the wrap.
+      // We need padding-top on the centre column so Final card midpoint = SF card midpoint.
+      const finalCard = wrap.querySelector(".final-card");
+      if (centre && finalCard && colCards[3] && colCards[3][0]) {
+        const sfCard = allCols[3] && allCols[3].querySelector(".bmatch");
+        if (sfCard) {
+          const sfR   = sfCard.getBoundingClientRect();
+          const sfMid = sfR.top - wr.top + sfR.height / 2; // SF midpoint relative to wrap
+          // Elements above the Final card inside bcentre:
+          const podiumEl     = centre.querySelector(".bcentre-podium");
+          const podiumH      = podiumEl ? podiumEl.getBoundingClientRect().height : 0;
+          const podiumMargin = 36; // bcentre-podium margin-bottom
+          const finalLabelEl = centre.querySelector(".bcentre-final > div:first-child");
+          const finalLabelH  = finalLabelEl ? finalLabelEl.getBoundingClientRect().height : 28;
+          const finalLabelMb = 10; // margin-bottom on the label div
+          const fcR          = finalCard.getBoundingClientRect();
+          const finalCardH   = fcR.height;
+          // Without any padding-top, the Final card midpoint is at:
+          // podiumH + podiumMargin + finalLabelH + finalLabelMb + finalCardH/2
+          // We want that to equal sfMid, so:
+          const naturalFinalMid = podiumH + podiumMargin + finalLabelH + finalLabelMb + finalCardH / 2;
+          const needed = Math.max(0, sfMid - naturalFinalMid);
+          centre.style.paddingTop = needed + "px";
+        }
+      }
+
+      // Re-measure after padding adjustment (next frame)
+      const buildSegs = () => {
+        const finalCard2 = wrap.querySelector(".final-card");
+        if (!finalCard2) return;
+        const fc2R = finalCard2.getBoundingClientRect();
+        const fc = {xL:fc2R.left-wr.left, xR:fc2R.right-wr.left, y:fc2R.top-wr.top+fc2R.height/2};
+
+        // Arrow size — path stops behind the arrowhead tip
+        const AH = 9; // arrowhead depth in px — path terminates this far before tip
+
+        // Regular column pairs: cubic bezier, path ends AH px behind arrowhead tip
+        const makePairs = (lCol, rCol, dir) => {
+          const out = [];
+          if (!lCol || !rCol || !lCol.length || !rCol.length) return out;
+          rCol.forEach((dst, i) => {
+            [lCol[i*2], lCol[i*2+1]].filter(Boolean).forEach(src => {
+              const x0  = dir==="ltr" ? src.xR + 4 : src.xL - 4;
+              const tip = dir==="ltr" ? dst.xL - 4 : dst.xR + 4;
+              const x1  = dir==="ltr" ? tip - AH    : tip + AH; // path ends before tip
+              const mx  = (x0 + x1) / 2;
+              out.push({d:`M${x0},${src.y} C${mx},${src.y} ${mx},${dst.y} ${x1},${dst.y}`,
+                        dir, tip, ay:dst.y});
+            });
+          });
+          return out;
+        };
+
+        // SF → Final: straight horizontal lines (no curve) — Final is now at SF height
+        const sfSegs = [];
+        const sfL = colCards[3] && colCards[3][0];
+        const sfR = colCards[4] && colCards[4][0];
+        if (sfL) {
+          const x0  = sfL.xR + 4;
+          const tip = fc.xL - 4;
+          const x1  = tip - AH;
+          sfSegs.push({d:`M${x0},${sfL.y} L${x1},${sfL.y}`, dir:"ltr", tip, ay:sfL.y});
+        }
+        if (sfR) {
+          const x0  = sfR.xL - 4;
+          const tip = fc.xR + 4;
+          const x1  = tip + AH;
+          sfSegs.push({d:`M${x0},${sfR.y} L${x1},${sfR.y}`, dir:"rtl", tip, ay:sfR.y});
+        }
+
+        setSegs([
+          ...makePairs(colCards[0],colCards[1],"ltr"),
+          ...makePairs(colCards[1],colCards[2],"ltr"),
+          ...makePairs(colCards[2],colCards[3],"ltr"),
+          ...makePairs(colCards[7],colCards[6],"rtl"),
+          ...makePairs(colCards[6],colCards[5],"rtl"),
+          ...makePairs(colCards[5],colCards[4],"rtl"),
+          ...sfSegs
+        ]);
+      };
+      // Small delay so padding-top layout settles before re-measuring
+      setTimeout(buildSegs, 30);
+    };
+    const t = setTimeout(draw, 180);
+    const ro = new ResizeObserver(draw);
+    if (wrapRef.current) ro.observe(wrapRef.current);
+    return () => { clearTimeout(t); ro.disconnect(); };
+  }, [wrapRef, centreRef]);
+
+  if (!segs.length || !wrapRef.current) return null;
+  const W = wrapRef.current.scrollWidth, H = wrapRef.current.scrollHeight;
+
+  // Arrowhead: solid filled triangle, tip at (seg.tip, seg.ay)
+  // Path terminates AH px before the tip so the line doesn't poke through
+  const AH = 9;
+  const arrowHead = (seg, i) => {
+    const col = seg.dir==="ltr" ? "rgba(99,179,237,0.65)" : "rgba(167,139,250,0.65)";
+    const hw = AH * 0.55; // half-width of arrowhead base
+    const pts = seg.dir==="ltr"
+      ? `${seg.tip},${seg.ay} ${seg.tip-AH},${seg.ay-hw} ${seg.tip-AH},${seg.ay+hw}`
+      : `${seg.tip},${seg.ay} ${seg.tip+AH},${seg.ay-hw} ${seg.tip+AH},${seg.ay+hw}`;
+    return eGlobal("polygon",{key:"ah"+i, points:pts, fill:col, stroke:"none"});
+  };
+  return eGlobal("svg",{style:{position:"absolute",top:0,left:0,width:W,height:H,pointerEvents:"none",zIndex:0},viewBox:`0 0 ${W} ${H}`},
+    eGlobal("defs",null,
+      eGlobal("filter",{id:"bglow"},
+        eGlobal("feGaussianBlur",{stdDeviation:"1.0",result:"b"}),
+        eGlobal("feMerge",null,eGlobal("feMergeNode",{in:"b"}),eGlobal("feMergeNode",{in:"SourceGraphic"}))
+      )
+    ),
+    segs.map((seg,i) => eGlobal("g",{key:i,filter:"url(#bglow)"},
+      eGlobal("path",{d:seg.d,fill:"none",
+        stroke:seg.dir==="ltr"?"rgba(99,179,237,0.40)":"rgba(167,139,250,0.40)",
+        strokeWidth:"2.2",strokeLinecap:"butt"}),
+      arrowHead(seg,i)
+    ))
+  );
+}
+
+// Centre column: podium (top, separated) → Final (aligned with SF) → Bronze (offset below).
+// ctx bundles everything this used to read from App()'s closures: gKO, getPred, sfLoser,
+// renderFinalMatch, renderBMatch. Bundling into one object keeps the prop list manageable —
+// the values inside ctx are rebuilt fresh every render (totally normal), only the CentreCol
+// function reference itself needs to stay constant.
+function CentreCol({centreRef, ctx}) {
+  const {gKO, getPred, sfLoser, renderFinalMatch, renderBMatch} = ctx;
+  const finalT1 = gKO("M101"), finalT2 = gKO("M102");
+  const champ   = gKO("M104");
+  const runner  = (champ&&finalT1&&finalT2) ? (champ===finalT1?finalT2:finalT1) : null;
+  const third   = gKO("M103");
+  const slot = (rank,label,team,bg,fsz,nsz,medal) =>
+    eGlobal("div",{key:rank,style:{display:"flex",alignItems:"center",gap:"8px",padding:"6px 10px",borderRadius:"8px",marginBottom:"4px",background:bg||"transparent"}},
+      eGlobal("span",{style:{fontSize:fsz,lineHeight:1,flexShrink:0}}, team?getFlag(team):"\u2753"),
+      eGlobal("div",{style:{flex:1,minWidth:0}},
+        eGlobal("div",{style:{fontSize:"10px",fontWeight:800,color:"#92400e",letterSpacing:"0.05em"}},medal+" "+label),
+        eGlobal("div",{style:{fontSize:nsz,fontWeight:700,color:team?"#1e3a5f":"#b8b8b8",fontStyle:team?"normal":"italic",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},team||"TBD")
+      )
+    );
+  const podium = eGlobal("div",{className:"bcentre-podium",style:{border:"2.5px solid #f59e0b",borderRadius:"12px",background:"linear-gradient(145deg,#fffbeb,#fef3c7)",padding:"12px",boxShadow:"0 4px 20px rgba(245,158,11,.22)"}},
+    eGlobal("div",{style:{fontWeight:800,color:"#92400e",textAlign:"center",marginBottom:"10px",fontSize:"12px",letterSpacing:"0.12em"}},"\uD83C\uDFC6 PODIUM"),
+    slot(1,"CHAMPION", champ,  "#fde68a","2.6em","15px","\uD83E\uDD47"),
+    slot(2,"Runner-up",runner, "#e5e7eb","1.9em","12px","\uD83E\uDD48"),
+    slot(3,"3rd Place",third,  "#fed7aa","1.5em","11px","\uD83E\uDD49"),
+    eGlobal("div",{style:{borderTop:"1px dashed #f59e0b",margin:"8px 0"}}),
+    eGlobal("div",{style:{display:"flex",justifyContent:"space-between",padding:"3px 6px"}},
+      eGlobal("span",{style:{fontWeight:700,color:"#92400e",fontSize:"10px"}},"\u26BD Golden Boot"),
+      eGlobal("span",{style:{fontWeight:700,color:getPred("GOLDEN_BOOT")?"#1e3a5f":"#b8b8b8",fontSize:"10px",fontStyle:getPred("GOLDEN_BOOT")?"normal":"italic"}},getPred("GOLDEN_BOOT")||"TBD")
+    ),
+    eGlobal("div",{style:{display:"flex",justifyContent:"space-between",padding:"3px 6px",marginTop:"2px"}},
+      eGlobal("span",{style:{fontWeight:700,color:"#92400e",fontSize:"10px"}},"\u2B50 MVP"),
+      eGlobal("span",{style:{fontWeight:700,color:getPred("MVP")?"#1e3a5f":"#b8b8b8",fontSize:"10px",fontStyle:getPred("MVP")?"normal":"italic"}},getPred("MVP")||"TBD")
+    )
+  );
+  const finalMatch = eGlobal("div",{className:"bcentre-final"},
+    eGlobal("div",{style:{textAlign:"center",marginBottom:"10px",display:"flex",alignItems:"center",gap:"8px",justifyContent:"center"}},
+      eGlobal("div",{style:{flex:1,height:"1px",background:"linear-gradient(to right,transparent,rgba(245,158,11,0.4))"}}),
+      eGlobal("div",{style:{fontWeight:800,fontSize:"11px",letterSpacing:"1.5px",color:"#3b2403",background:"linear-gradient(120deg,#fbbf24,#f59e0b)",padding:"7px 14px",borderRadius:"20px",whiteSpace:"nowrap"}},"FINAL — Jul 19"),
+      eGlobal("div",{style:{flex:1,height:"1px",background:"linear-gradient(to left,transparent,rgba(245,158,11,0.4))"}})
+    ),
+    renderFinalMatch({mid:"M104",t1:finalT1,t2:finalT2})
+  );
+  const bronze = eGlobal("div",{className:"bcentre-bronze"},
+    eGlobal("div",{style:{textAlign:"center",fontWeight:800,fontSize:"10px",color:"#92400e",background:"#fed7aa",borderRadius:"6px",padding:"3px",marginBottom:"5px"}},"BRONZE \u00B7 Jul 18"),
+    renderBMatch({mid:"M103",t1:sfLoser("M101"),t2:sfLoser("M102"),date:"Jul 18",label:"M103",waitingOn:"M101 & M102"})
+  );
+  return eGlobal("div",{className:"bcentre", ref:centreRef}, podium, finalMatch, bronze);
+}
+
+// Desktop horizontal-scroll bracket. Stable identity now, so .bscroll's native scroll position
+// (and the SVG connector overlay's measured state) survive normal poll/tick re-renders instead
+// of being torn down and rebuilt — the same root cause as the mobile remount bug, just less
+// visible on desktop since there's no per-round tab state to visibly snap back.
+function BracketWrap({ctx}) {
+  const {slots, gKO, renderBMatch} = ctx;
+  const wrapRef   = React.useRef(null);
+  const centreRef = React.useRef(null);
+  const r32m = (id) => { const m = R32.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:slots[m.s1], t2:slots[m.s2], date:m.d, label:m.id}); };
+  const kom  = (arr,id) => { const m = arr.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:gKO(m.f1), t2:gKO(m.f2), date:m.d, label:m.id, waitingOn:m.f1+" & "+m.f2}); };
+  const col  = (title, items) => eGlobal("div", {className:"bcol"},
+    eGlobal("div", {className:"bcolh"}, title),
+    eGlobal("div", {className:"bmatches"}, items)
+  );
+  return eGlobal("div",{className:"bscroll"},
+    eGlobal("div",{className:"bwrap",ref:wrapRef,style:{position:"relative"}},
+      eGlobal(BracketLines,{wrapRef, centreRef}),
+      col("Round of 32", R32_P1_IDS.map(id=>r32m(id))),
+      col("Round of 16", R16_P1_IDS.map(id=>kom(R16,id))),
+      col("Quarter Final", QF_P1_IDS.map(id=>kom(QF,id))),
+      col("Semi Final", [kom(SF,"M101")]),
+      eGlobal(CentreCol,{key:"centre", centreRef, ctx}),
+      col("Semi Final", [kom(SF,"M102")]),
+      col("Quarter Final", QF_P2_IDS.map(id=>kom(QF,id))),
+      col("Round of 16", R16_P2_IDS.map(id=>kom(R16,id))),
+      col("Round of 32", R32_P2_IDS.map(id=>r32m(id)))
+    )
+  );
+}
+
+// Mobile: simple stacked list, no horizontal scrolling needed — tap a round pill to switch.
+// This is the component whose remounting caused the reported "snaps back to far left" bug:
+// activeRound state was being reset to pickDefaultRound() on every App() re-render because
+// MobileBracket used to be a brand-new function every time, so React fully remounted it on
+// every ~8s poll. Now that it's a stable top-level function, activeRound persists normally.
+function MobileBracket({ctx, nowTick}) {
+  const {slots, gKO, getPred, sfLoser, renderBMatch, renderFinalMatch} = ctx;
+  const r32m = (id) => { const m = R32.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:slots[m.s1], t2:slots[m.s2], date:m.d, label:m.id}); };
+  const kom  = (arr,id) => { const m = arr.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:gKO(m.f1), t2:gKO(m.f2), date:m.d, label:m.id, waitingOn:m.f1+" & "+m.f2}); };
+
+  const MOBILE_ROUNDS = [
+    {key:"r32", label:"Round of 32", range: roundDateRange(R32), render:() => [...R32_P1_IDS, ...R32_P2_IDS].map(id=>r32m(id))},
+    {key:"r16", label:"Round of 16", range: roundDateRange(R16), render:() => [...R16_P1_IDS, ...R16_P2_IDS].map(id=>kom(R16,id))},
+    {key:"qf",  label:"Quarter Finals", range: roundDateRange(QF), render:() => [...QF_P1_IDS, ...QF_P2_IDS].map(id=>kom(QF,id))},
+    {key:"sf",  label:"Semi Finals", range: roundDateRange(SF), render:() => [kom(SF,"M101"), kom(SF,"M102")]},
+    {key:"podium", label:"Bronze, Final & Podium", range: roundDateRange([{d:"Jul 18"},{d:"Jul 19"}]), render:() => {
+      const finalT1 = gKO("M101"), finalT2 = gKO("M102");
+      const champ   = gKO("M104");
+      const runner  = (champ&&finalT1&&finalT2) ? (champ===finalT1?finalT2:finalT1) : null;
+      const third   = gKO("M103");
+      return [
+        eGlobal("div",{key:"bronze-m", className:"mb-3"},
+          eGlobal("div",{className:"text-center text-[10px] font-extrabold text-amber-800 bg-orange-100 rounded-md py-1 mb-2"}, "BRONZE \u00B7 Jul 18"),
+          renderBMatch({mid:"M103",t1:sfLoser("M101"),t2:sfLoser("M102"),date:"Jul 18",label:"M103",waitingOn:"M101 & M102"})
+        ),
+        eGlobal("div",{key:"final-m", className:"mb-3"},
+          eGlobal("div",{className:"text-center text-[11px] font-extrabold text-white bg-gradient-to-r from-amber-500 to-orange-600 rounded-md py-1.5 mb-2"}, "\uD83C\uDFC6 FINAL \u00B7 Jul 19"),
+          renderFinalMatch({mid:"M104",t1:finalT1,t2:finalT2})
+        ),
+        eGlobal("div",{key:"podium-m", className:"rounded-xl p-3", style:{border:"2px solid #f59e0b", background:"linear-gradient(145deg,#fffbeb,#fef3c7)"}},
+          eGlobal("div",{className:"text-center text-[11px] font-extrabold text-amber-800 mb-2"}, "\uD83C\uDFC6 PODIUM"),
+          [["\uD83E\uDD47","Champion",champ],["\uD83E\uDD48","Runner-up",runner],["\uD83E\uDD49","3rd Place",third]].map(([medal,label,team]) =>
+            eGlobal("div",{key:label, className:"flex items-center gap-2 py-1"},
+              eGlobal("span",{className:"text-base"}, medal),
+              eGlobal("span",{className:"text-[10px] font-bold text-amber-700 w-20 flex-shrink-0"}, label),
+              eGlobal("span",{className:"text-sm font-bold " + (team?"text-blue-900":"text-gray-400 italic")}, team ? getFlag(team)+"\u00A0"+team : "TBD")
+            )
+          ),
+          eGlobal("div",{className:"border-t border-dashed border-amber-400 my-2"}),
+          [["\u26BD","Golden Boot",getPred("GOLDEN_BOOT")],["\u2B50","MVP",getPred("MVP")]].map(([icon,label,val]) =>
+            eGlobal("div",{key:label, className:"flex justify-between py-0.5"},
+              eGlobal("span",{className:"text-[10px] font-bold text-amber-700"}, icon+" "+label),
+              eGlobal("span",{className:"text-[11px] font-bold " + (val?"text-blue-900":"text-gray-400 italic")}, val||"TBD")
+            )
+          )
+        )
+      ];
+    }}
+  ];
+
+  // Pick whichever round is "live" right now (today falls inside its date range).
+  // If we're in a gap between rounds (yesterday's round just finished, tomorrow's
+  // hasn't started), land on the round that just finished rather than jumping ahead —
+  // that's usually what people want to check first. Before the knockouts begin at all,
+  // fall back to Round of 32 as the sensible starting point.
+  // NOTE: this only runs once, on mount (useState's lazy initializer) — exactly what we
+  // want now that MobileBracket has a stable identity and mounts only once per session.
+  const pickDefaultRound = () => {
+    const current = MOBILE_ROUNDS.find(r => r.range && nowTick >= r.range.start && nowTick <= r.range.end);
+    if (current) return current.key;
+    const ended = MOBILE_ROUNDS.filter(r => r.range && r.range.end < nowTick);
+    if (ended.length) return ended[ended.length - 1].key; // most recently finished
+    return MOBILE_ROUNDS[0].key; // tournament hasn't reached the knockouts yet
+  };
+
+  const [activeRound, setActiveRound] = React.useState(pickDefaultRound);
+  const current = MOBILE_ROUNDS.find(r => r.key === activeRound) || MOBILE_ROUNDS[0];
+  return eGlobal("div", {className:"md:hidden"},
+    eGlobal("div", {className:"flex gap-1.5 mb-4 overflow-x-auto pb-1", style:{scrollbarWidth:"none"}},
+      MOBILE_ROUNDS.map(r => eGlobal("button", {
+        key:r.key, onClick:()=>setActiveRound(r.key),
+        className:"flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition " +
+          (activeRound===r.key ? "bg-blue-600 text-white shadow" : "bg-blue-50 text-blue-700")
+      }, r.label))
+    ),
+    eGlobal("div", {className:"space-y-2"}, current.render())
+  );
+}
+
 function App() {
   const [players, setPlayers] = useState([]);
   const [newName, setNewName] = useState("");
@@ -1234,6 +1572,36 @@ function App() {
     );
   };
 
+  // Larger gold-bordered Final card. Lives alongside renderBMatch as a render-helper closure
+  // (not a React component itself, just called directly) — passed into bracketCtx below so
+  // the module-scope CentreCol/MobileBracket components can use it without needing to be
+  // recreated every render themselves.
+  const renderFinalMatch = (props) => {
+    const pr = getPred(props.mid);
+    const opts = [props.t1, props.t2].filter(Boolean);
+    const validPick = opts.indexOf(pr) !== -1 ? pr : "";
+    let action;
+    if (opts.length === 2 && !isRO && !bracketLocked)
+      action = e("select", {value:validPick, onChange:ev=>setKO(props.mid,ev.target.value), className:"bsel"},
+        e("option",{value:""},"Pick champion"),
+        opts.map(t=>e("option",{key:t,value:t},t))
+      );
+    else if (opts.length === 2 && !isRO && bracketLocked)
+      action = e("div",{className:"bdisabled"}, pr ? "\uD83D\uDD12 "+pr : "\uD83D\uDD12 Locked - no pick");
+    else if (opts.length === 2 && isRO)
+      action = e("div",{className:"bdisabled"}, pr ? "Picked: "+pr : "No pick yet");
+    else
+      action = e("div",{className:"bdisabled"}, "Awaiting SF winners");
+    return e("div", {className:"bmatch final-card"},
+      e("div", {className:"bteam final-card-team"+(validPick===props.t1&&props.t1?" won":!props.t1?" tbd":"")},
+        props.t1 ? getFlag(props.t1)+"\u00A0"+props.t1 : "TBD"),
+      e("div", {className:"bvs final-card-vs"}, "\uD83C\uDFC6 FINAL \u00B7 Jul 19"),
+      e("div", {className:"bteam final-card-team"+(validPick===props.t2&&props.t2?" won":!props.t2?" tbd":"")},
+        props.t2 ? getFlag(props.t2)+"\u00A0"+props.t2 : "TBD"),
+      action
+    );
+  };
+
   const Tab = (l, t) => e("button", {
     key: t,
     onClick: () => setTab(t),
@@ -1758,347 +2126,17 @@ function App() {
         )
       );
     } else if (tab === "bracket") {
+      // ctx bundles the live closures (current preds/results/slots-derived helpers) that the
+      // module-scope bracket components need. Rebuilding this object every render is fine and
+      // normal — only BracketWrap/CentreCol/MobileBracket's own function identity needs to stay
+      // stable, which it now does since they're defined once at module scope (see above App()).
+      const bracketCtx = {slots, gKO, getPred, sfLoser, renderBMatch, renderFinalMatch};
       tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
         e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Knockout Stages"),
         e("p", {className: "text-gray-500 text-sm mb-4"}, "Official FIFA format: 12 group winners + 12 runners-up + 8 best third-placed teams. Teams auto-fill from your group predictions. " +
           (bracketLocked ? "\uD83D\uDD12 The bracket is locked - the knockout stage is underway." : "All bracket picks lock when the knockout stage kicks off: " + fmtKO(KNOCKOUT_LOCK) + " (your local time).")),
-        (() => {
-          const P1_R32 = ["M74","M77","M73","M75","M83","M84","M81","M82"];
-          const P2_R32 = ["M76","M78","M79","M80","M86","M88","M85","M87"];
-          const P1_R16 = ["M89","M90","M93","M94"];
-          const P2_R16 = ["M91","M92","M95","M96"];
-          const P1_QF  = ["M97","M98"];
-          const P2_QF  = ["M99","M100"];
-          const r32m = (id) => { const m = R32.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:slots[m.s1], t2:slots[m.s2], date:m.d, label:m.id}); };
-          const kom  = (arr,id) => { const m = arr.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:gKO(m.f1), t2:gKO(m.f2), date:m.d, label:m.id, waitingOn:m.f1+" & "+m.f2}); };
-          const col  = (title, items) => e("div", {className:"bcol"},
-            e("div", {className:"bcolh"}, title),
-            e("div", {className:"bmatches"}, items)
-          );
-
-          // Larger gold-bordered Final card
-          const renderFinalMatch = (props) => {
-            const pr = getPred(props.mid);
-            const opts = [props.t1, props.t2].filter(Boolean);
-            const validPick = opts.indexOf(pr) !== -1 ? pr : "";
-            let action;
-            if (opts.length === 2 && !isRO && !bracketLocked)
-              action = e("select", {value:validPick, onChange:ev=>setKO(props.mid,ev.target.value), className:"bsel"},
-                e("option",{value:""},"Pick champion"),
-                opts.map(t=>e("option",{key:t,value:t},t))
-              );
-            else if (opts.length === 2 && !isRO && bracketLocked)
-              action = e("div",{className:"bdisabled"}, pr ? "\uD83D\uDD12 "+pr : "\uD83D\uDD12 Locked - no pick");
-            else if (opts.length === 2 && isRO)
-              action = e("div",{className:"bdisabled"}, pr ? "Picked: "+pr : "No pick yet");
-            else
-              action = e("div",{className:"bdisabled"}, "Awaiting SF winners");
-            return e("div", {className:"bmatch final-card"},
-              e("div", {className:"bteam final-card-team"+(validPick===props.t1&&props.t1?" won":!props.t1?" tbd":"")},
-                props.t1 ? getFlag(props.t1)+"\u00A0"+props.t1 : "TBD"),
-              e("div", {className:"bvs final-card-vs"}, "\uD83C\uDFC6 FINAL \u00B7 Jul 19"),
-              e("div", {className:"bteam final-card-team"+(validPick===props.t2&&props.t2?" won":!props.t2?" tbd":"")},
-                props.t2 ? getFlag(props.t2)+"\u00A0"+props.t2 : "TBD"),
-              action
-            );
-          };
-
-          // SVG overlay: measures real .bmatch positions, draws arrows with correct tips
-          const BracketLines = ({wrapRef, centreRef}) => {
-            const [segs, setSegs] = React.useState([]);
-            React.useEffect(() => {
-              const draw = () => {
-                const wrap = wrapRef.current;
-                const centre = centreRef.current;
-                if (!wrap) return;
-                const wr = wrap.getBoundingClientRect();
-                const allCols = Array.from(wrap.querySelectorAll(".bcol"));
-                const colCards = allCols.map(col =>
-                  Array.from(col.querySelectorAll(".bmatch")).map(c => {
-                    const r = c.getBoundingClientRect();
-                    return {xR:r.right-wr.left, xL:r.left-wr.left, y:r.top-wr.top+r.height/2};
-                  })
-                );
-                // col indices: 0=P1_R32(8), 1=P1_R16(4), 2=P1_QF(2), 3=P1_SF(1),
-                //              [centre .bcentre not .bcol]
-                //              4=P2_SF(1), 5=P2_QF(2), 6=P2_R16(4), 7=P2_R32(8)
-
-                // ── Align Final card midpoint with SF card midpoint ─────────────
-                // With align-items:center, the SF card sits at the vertical middle of the wrap.
-                // We need padding-top on the centre column so Final card midpoint = SF card midpoint.
-                const finalCard = wrap.querySelector(".final-card");
-                if (centre && finalCard && colCards[3] && colCards[3][0]) {
-                  const sfCard = allCols[3] && allCols[3].querySelector(".bmatch");
-                  if (sfCard) {
-                    const sfR   = sfCard.getBoundingClientRect();
-                    const sfMid = sfR.top - wr.top + sfR.height / 2; // SF midpoint relative to wrap
-                    // Elements above the Final card inside bcentre:
-                    const podiumEl     = centre.querySelector(".bcentre-podium");
-                    const podiumH      = podiumEl ? podiumEl.getBoundingClientRect().height : 0;
-                    const podiumMargin = 36; // bcentre-podium margin-bottom
-                    const finalLabelEl = centre.querySelector(".bcentre-final > div:first-child");
-                    const finalLabelH  = finalLabelEl ? finalLabelEl.getBoundingClientRect().height : 28;
-                    const finalLabelMb = 10; // margin-bottom on the label div
-                    const fcR          = finalCard.getBoundingClientRect();
-                    const finalCardH   = fcR.height;
-                    // Without any padding-top, the Final card midpoint is at:
-                    // podiumH + podiumMargin + finalLabelH + finalLabelMb + finalCardH/2
-                    // We want that to equal sfMid, so:
-                    const naturalFinalMid = podiumH + podiumMargin + finalLabelH + finalLabelMb + finalCardH / 2;
-                    const needed = Math.max(0, sfMid - naturalFinalMid);
-                    centre.style.paddingTop = needed + "px";
-                  }
-                }
-
-                // Re-measure after padding adjustment (next frame)
-                const buildSegs = () => {
-                  const finalCard2 = wrap.querySelector(".final-card");
-                  if (!finalCard2) return;
-                  const fc2R = finalCard2.getBoundingClientRect();
-                  const fc = {xL:fc2R.left-wr.left, xR:fc2R.right-wr.left, y:fc2R.top-wr.top+fc2R.height/2};
-
-                  // Arrow size — path stops behind the arrowhead tip
-                  const AH = 9; // arrowhead depth in px — path terminates this far before tip
-
-                  // Regular column pairs: cubic bezier, path ends AH px behind arrowhead tip
-                  const makePairs = (lCol, rCol, dir) => {
-                    const out = [];
-                    if (!lCol || !rCol || !lCol.length || !rCol.length) return out;
-                    rCol.forEach((dst, i) => {
-                      [lCol[i*2], lCol[i*2+1]].filter(Boolean).forEach(src => {
-                        const x0  = dir==="ltr" ? src.xR + 4 : src.xL - 4;
-                        const tip = dir==="ltr" ? dst.xL - 4 : dst.xR + 4;
-                        const x1  = dir==="ltr" ? tip - AH    : tip + AH; // path ends before tip
-                        const mx  = (x0 + x1) / 2;
-                        out.push({d:`M${x0},${src.y} C${mx},${src.y} ${mx},${dst.y} ${x1},${dst.y}`,
-                                  dir, tip, ay:dst.y});
-                      });
-                    });
-                    return out;
-                  };
-
-                  // SF → Final: straight horizontal lines (no curve) — Final is now at SF height
-                  const sfSegs = [];
-                  const sfL = colCards[3] && colCards[3][0];
-                  const sfR = colCards[4] && colCards[4][0];
-                  if (sfL) {
-                    const x0  = sfL.xR + 4;
-                    const tip = fc.xL - 4;
-                    const x1  = tip - AH;
-                    sfSegs.push({d:`M${x0},${sfL.y} L${x1},${sfL.y}`, dir:"ltr", tip, ay:sfL.y});
-                  }
-                  if (sfR) {
-                    const x0  = sfR.xL - 4;
-                    const tip = fc.xR + 4;
-                    const x1  = tip + AH;
-                    sfSegs.push({d:`M${x0},${sfR.y} L${x1},${sfR.y}`, dir:"rtl", tip, ay:sfR.y});
-                  }
-
-                  setSegs([
-                    ...makePairs(colCards[0],colCards[1],"ltr"),
-                    ...makePairs(colCards[1],colCards[2],"ltr"),
-                    ...makePairs(colCards[2],colCards[3],"ltr"),
-                    ...makePairs(colCards[7],colCards[6],"rtl"),
-                    ...makePairs(colCards[6],colCards[5],"rtl"),
-                    ...makePairs(colCards[5],colCards[4],"rtl"),
-                    ...sfSegs
-                  ]);
-                };
-                // Small delay so padding-top layout settles before re-measuring
-                setTimeout(buildSegs, 30);
-              };
-              const t = setTimeout(draw, 180);
-              const ro = new ResizeObserver(draw);
-              if (wrapRef.current) ro.observe(wrapRef.current);
-              return () => { clearTimeout(t); ro.disconnect(); };
-            }, [wrapRef, centreRef]);
-
-            if (!segs.length || !wrapRef.current) return null;
-            const W = wrapRef.current.scrollWidth, H = wrapRef.current.scrollHeight;
-
-            // Arrowhead: solid filled triangle, tip at (seg.tip, seg.ay)
-            // Path terminates AH px before the tip so the line doesn't poke through
-            const AH = 9;
-            const arrowHead = (seg, i) => {
-              const col = seg.dir==="ltr" ? "rgba(99,179,237,0.65)" : "rgba(167,139,250,0.65)";
-              const hw = AH * 0.55; // half-width of arrowhead base
-              const pts = seg.dir==="ltr"
-                ? `${seg.tip},${seg.ay} ${seg.tip-AH},${seg.ay-hw} ${seg.tip-AH},${seg.ay+hw}`
-                : `${seg.tip},${seg.ay} ${seg.tip+AH},${seg.ay-hw} ${seg.tip+AH},${seg.ay+hw}`;
-              return e("polygon",{key:"ah"+i, points:pts, fill:col, stroke:"none"});
-            };
-            return e("svg",{style:{position:"absolute",top:0,left:0,width:W,height:H,pointerEvents:"none",zIndex:0},viewBox:`0 0 ${W} ${H}`},
-              e("defs",null,
-                e("filter",{id:"bglow"},
-                  e("feGaussianBlur",{stdDeviation:"1.0",result:"b"}),
-                  e("feMerge",null,e("feMergeNode",{in:"b"}),e("feMergeNode",{in:"SourceGraphic"}))
-                )
-              ),
-              segs.map((seg,i) => e("g",{key:i,filter:"url(#bglow)"},
-                e("path",{d:seg.d,fill:"none",
-                  stroke:seg.dir==="ltr"?"rgba(99,179,237,0.40)":"rgba(167,139,250,0.40)",
-                  strokeWidth:"2.2",strokeLinecap:"butt"}),
-                arrowHead(seg,i)
-              ))
-            );
-          };
-
-          // Centre column: podium (top, separated) → Final (aligned with SF) → Bronze (offset below)
-          const CentreCol = ({centreRef}) => {
-            const finalT1 = gKO("M101"), finalT2 = gKO("M102");
-            const champ   = gKO("M104");
-            const runner  = (champ&&finalT1&&finalT2) ? (champ===finalT1?finalT2:finalT1) : null;
-            const third   = gKO("M103");
-            const slot = (rank,label,team,bg,fsz,nsz,medal) =>
-              e("div",{key:rank,style:{display:"flex",alignItems:"center",gap:"8px",padding:"6px 10px",borderRadius:"8px",marginBottom:"4px",background:bg||"transparent"}},
-                e("span",{style:{fontSize:fsz,lineHeight:1,flexShrink:0}}, team?getFlag(team):"\u2753"),
-                e("div",{style:{flex:1,minWidth:0}},
-                  e("div",{style:{fontSize:"10px",fontWeight:800,color:"#92400e",letterSpacing:"0.05em"}},medal+" "+label),
-                  e("div",{style:{fontSize:nsz,fontWeight:700,color:team?"#1e3a5f":"#b8b8b8",fontStyle:team?"normal":"italic",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},team||"TBD")
-                )
-              );
-            const podium = e("div",{className:"bcentre-podium",style:{border:"2.5px solid #f59e0b",borderRadius:"12px",background:"linear-gradient(145deg,#fffbeb,#fef3c7)",padding:"12px",boxShadow:"0 4px 20px rgba(245,158,11,.22)"}},
-              e("div",{style:{fontWeight:800,color:"#92400e",textAlign:"center",marginBottom:"10px",fontSize:"12px",letterSpacing:"0.12em"}},"\uD83C\uDFC6 PODIUM"),
-              slot(1,"CHAMPION", champ,  "#fde68a","2.6em","15px","\uD83E\uDD47"),
-              slot(2,"Runner-up",runner, "#e5e7eb","1.9em","12px","\uD83E\uDD48"),
-              slot(3,"3rd Place",third,  "#fed7aa","1.5em","11px","\uD83E\uDD49"),
-              e("div",{style:{borderTop:"1px dashed #f59e0b",margin:"8px 0"}}),
-              e("div",{style:{display:"flex",justifyContent:"space-between",padding:"3px 6px"}},
-                e("span",{style:{fontWeight:700,color:"#92400e",fontSize:"10px"}},"\u26BD Golden Boot"),
-                e("span",{style:{fontWeight:700,color:getPred("GOLDEN_BOOT")?"#1e3a5f":"#b8b8b8",fontSize:"10px",fontStyle:getPred("GOLDEN_BOOT")?"normal":"italic"}},getPred("GOLDEN_BOOT")||"TBD")
-              ),
-              e("div",{style:{display:"flex",justifyContent:"space-between",padding:"3px 6px",marginTop:"2px"}},
-                e("span",{style:{fontWeight:700,color:"#92400e",fontSize:"10px"}},"\u2B50 MVP"),
-                e("span",{style:{fontWeight:700,color:getPred("MVP")?"#1e3a5f":"#b8b8b8",fontSize:"10px",fontStyle:getPred("MVP")?"normal":"italic"}},getPred("MVP")||"TBD")
-              )
-            );
-            const finalMatch = e("div",{className:"bcentre-final"},
-              e("div",{style:{textAlign:"center",marginBottom:"10px",display:"flex",alignItems:"center",gap:"8px",justifyContent:"center"}},
-                e("div",{style:{flex:1,height:"1px",background:"linear-gradient(to right,transparent,rgba(245,158,11,0.4))"}}),
-                e("div",{style:{fontWeight:800,fontSize:"11px",letterSpacing:"1.5px",color:"#3b2403",background:"linear-gradient(120deg,#fbbf24,#f59e0b)",padding:"7px 14px",borderRadius:"20px",whiteSpace:"nowrap"}},"FINAL — Jul 19"),
-                e("div",{style:{flex:1,height:"1px",background:"linear-gradient(to left,transparent,rgba(245,158,11,0.4))"}})
-              ),
-              renderFinalMatch({mid:"M104",t1:finalT1,t2:finalT2})
-            );
-            const bronze = e("div",{className:"bcentre-bronze"},
-              e("div",{style:{textAlign:"center",fontWeight:800,fontSize:"10px",color:"#92400e",background:"#fed7aa",borderRadius:"6px",padding:"3px",marginBottom:"5px"}},"BRONZE \u00B7 Jul 18"),
-              renderBMatch({mid:"M103",t1:sfLoser("M101"),t2:sfLoser("M102"),date:"Jul 18",label:"M103",waitingOn:"M101 & M102"})
-            );
-            return e("div",{className:"bcentre", ref:centreRef}, podium, finalMatch, bronze);
-          };
-
-          const BracketWrap = () => {
-            const wrapRef   = useRef(null);
-            const centreRef = useRef(null);
-            return e("div",{className:"bscroll"},
-              e("div",{className:"bwrap",ref:wrapRef,style:{position:"relative"}},
-                e(BracketLines,{wrapRef, centreRef}),
-                col("Round of 32", P1_R32.map(id=>r32m(id))),
-                col("Round of 16", P1_R16.map(id=>kom(R16,id))),
-                col("Quarter Final", P1_QF.map(id=>kom(QF,id))),
-                col("Semi Final", [kom(SF,"M101")]),
-                e(CentreCol,{key:"centre", centreRef}),
-                col("Semi Final", [kom(SF,"M102")]),
-                col("Quarter Final", P2_QF.map(id=>kom(QF,id))),
-                col("Round of 16", P2_R16.map(id=>kom(R16,id))),
-                col("Round of 32", P2_R32.map(id=>r32m(id)))
-              )
-            );
-          };
-
-          // ---- MOBILE: simple stacked list, no horizontal scrolling needed ----
-          // Same renderBMatch cards, just laid out vertically round-by-round with jump links.
-          // Each round's "d" labels (e.g. "Jun 28") are display strings, not real Date objects —
-          // parse them here (year is always 2026 for this tournament) so we can figure out which
-          // round is actually current and default mobile users straight into it, instead of always
-          // dropping them on Round of 32 once the tournament has moved on.
-          const MONTH_IDX = {Jun: 5, Jul: 6}; // JS month index (0-based)
-          const parseRoundDate = (label) => {
-            const [mon, day] = label.split(" ");
-            if (!(mon in MONTH_IDX)) return null;
-            return Date.UTC(2026, MONTH_IDX[mon], Number(day));
-          };
-          const roundDateRange = (matches) => {
-            const days = matches.map(m => parseRoundDate(m.d)).filter(Boolean);
-            if (!days.length) return null;
-            // End-of-day (23:59:59 UTC) on the last match's date, so a round stays "current"
-            // through the day its last match is played, not just up to midnight.
-            return {start: Math.min(...days), end: Math.max(...days) + 24*60*60*1000 - 1};
-          };
-          const MOBILE_ROUNDS = [
-            {key:"r32", label:"Round of 32", range: roundDateRange(R32), render:() => [...P1_R32, ...P2_R32].map(id=>r32m(id))},
-            {key:"r16", label:"Round of 16", range: roundDateRange(R16), render:() => [...P1_R16, ...P2_R16].map(id=>kom(R16,id))},
-            {key:"qf",  label:"Quarter Finals", range: roundDateRange(QF), render:() => [...P1_QF, ...P2_QF].map(id=>kom(QF,id))},
-            {key:"sf",  label:"Semi Finals", range: roundDateRange(SF), render:() => [kom(SF,"M101"), kom(SF,"M102")]},
-
-            {key:"podium", label:"Bronze, Final & Podium", range: roundDateRange([{d:"Jul 18"},{d:"Jul 19"}]), render:() => {
-              const finalT1 = gKO("M101"), finalT2 = gKO("M102");
-              const champ   = gKO("M104");
-              const runner  = (champ&&finalT1&&finalT2) ? (champ===finalT1?finalT2:finalT1) : null;
-              const third   = gKO("M103");
-              return [
-                e("div",{key:"bronze-m", className:"mb-3"},
-                  e("div",{className:"text-center text-[10px] font-extrabold text-amber-800 bg-orange-100 rounded-md py-1 mb-2"}, "BRONZE \u00B7 Jul 18"),
-                  renderBMatch({mid:"M103",t1:sfLoser("M101"),t2:sfLoser("M102"),date:"Jul 18",label:"M103",waitingOn:"M101 & M102"})
-                ),
-                e("div",{key:"final-m", className:"mb-3"},
-                  e("div",{className:"text-center text-[11px] font-extrabold text-white bg-gradient-to-r from-amber-500 to-orange-600 rounded-md py-1.5 mb-2"}, "\uD83C\uDFC6 FINAL \u00B7 Jul 19"),
-                  renderFinalMatch({mid:"M104",t1:finalT1,t2:finalT2})
-                ),
-                e("div",{key:"podium-m", className:"rounded-xl p-3", style:{border:"2px solid #f59e0b", background:"linear-gradient(145deg,#fffbeb,#fef3c7)"}},
-                  e("div",{className:"text-center text-[11px] font-extrabold text-amber-800 mb-2"}, "\uD83C\uDFC6 PODIUM"),
-                  [["\uD83E\uDD47","Champion",champ],["\uD83E\uDD48","Runner-up",runner],["\uD83E\uDD49","3rd Place",third]].map(([medal,label,team]) =>
-                    e("div",{key:label, className:"flex items-center gap-2 py-1"},
-                      e("span",{className:"text-base"}, medal),
-                      e("span",{className:"text-[10px] font-bold text-amber-700 w-20 flex-shrink-0"}, label),
-                      e("span",{className:"text-sm font-bold " + (team?"text-blue-900":"text-gray-400 italic")}, team ? getFlag(team)+"\u00A0"+team : "TBD")
-                    )
-                  ),
-                  e("div",{className:"border-t border-dashed border-amber-400 my-2"}),
-                  [["\u26BD","Golden Boot",getPred("GOLDEN_BOOT")],["\u2B50","MVP",getPred("MVP")]].map(([icon,label,val]) =>
-                    e("div",{key:label, className:"flex justify-between py-0.5"},
-                      e("span",{className:"text-[10px] font-bold text-amber-700"}, icon+" "+label),
-                      e("span",{className:"text-[11px] font-bold " + (val?"text-blue-900":"text-gray-400 italic")}, val||"TBD")
-                    )
-                  )
-                )
-              ];
-            }}
-          ];
-
-          // Pick whichever round is "live" right now (today falls inside its date range).
-          // If we're in a gap between rounds (yesterday's round just finished, tomorrow's
-          // hasn't started), land on the round that just finished rather than jumping ahead —
-          // that's usually what people want to check first. Before the knockouts begin at all,
-          // fall back to Round of 32 as the sensible starting point.
-          const pickDefaultRound = () => {
-            const current = MOBILE_ROUNDS.find(r => r.range && nowTick >= r.range.start && nowTick <= r.range.end);
-            if (current) return current.key;
-            const ended = MOBILE_ROUNDS.filter(r => r.range && r.range.end < nowTick);
-            if (ended.length) return ended[ended.length - 1].key; // most recently finished
-            return MOBILE_ROUNDS[0].key; // tournament hasn't reached the knockouts yet
-          };
-
-          const MobileBracket = () => {
-            const [activeRound, setActiveRound] = useState(pickDefaultRound);
-            const current = MOBILE_ROUNDS.find(r => r.key === activeRound) || MOBILE_ROUNDS[0];
-            return e("div", {className:"md:hidden"},
-              e("div", {className:"flex gap-1.5 mb-4 overflow-x-auto pb-1", style:{scrollbarWidth:"none"}},
-                MOBILE_ROUNDS.map(r => e("button", {
-                  key:r.key, onClick:()=>setActiveRound(r.key),
-                  className:"flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition " +
-                    (activeRound===r.key ? "bg-blue-600 text-white shadow" : "bg-blue-50 text-blue-700")
-                }, r.label))
-              ),
-              e("div", {className:"space-y-2"}, current.render())
-            );
-          };
-
-          return e("div", null,
-            e("div", {className:"hidden md:block"}, e(BracketWrap, {key:"bwrap"})),
-            e(MobileBracket, {key:"mbracket"})
-          );
-        })()
+        e("div", {className:"hidden md:block"}, e(BracketWrap, {key:"bwrap", ctx: bracketCtx})),
+        e(MobileBracket, {key:"mbracket", ctx: bracketCtx, nowTick})
       );
     }
 

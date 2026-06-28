@@ -44,10 +44,17 @@ body{margin:0;padding:0;font-family:'Inter',system-ui,sans-serif;}
 .wc-d-rulesnote{border-radius:14px;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.03);
   padding:12px 14px;display:flex;gap:10px;align-items:flex-start;}
 .wc-d-rulesnote p{margin:0;font-size:11.5px;color:#7e8db0;line-height:1.55;}
-.wc-d-whatsnew{border-radius:14px;border:1px solid rgba(167,139,250,.25);
-  background:linear-gradient(165deg,rgba(167,139,250,.1),rgba(167,139,250,.02));padding:13px 14px;}
-.wc-d-whatsnew-tag{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;
-  letter-spacing:.08em;text-transform:uppercase;color:#e3d9ff;}
+.wc-d-reset{border-radius:16px;border:2px solid rgba(246,196,83,.55);
+  background:linear-gradient(160deg,rgba(246,196,83,.16),rgba(246,196,83,.03));
+  padding:18px 18px;box-shadow:0 0 0 1px rgba(246,196,83,.08) inset, 0 14px 32px rgba(246,196,83,.08);}
+.wc-d-reset-tag{display:inline-flex;align-items:center;gap:8px;font-size:15px;font-weight:800;
+  letter-spacing:.04em;text-transform:uppercase;color:#f6c453;}
+.wc-d-reset h3{margin:8px 0 10px;font-size:19px;font-weight:800;color:#fff;line-height:1.25;
+  font-family:'Bebas Neue',sans-serif;letter-spacing:.5px;}
+.wc-d-reset ul{margin:0;padding-left:20px;list-style:disc;}
+.wc-d-reset li{font-size:14.5px;font-weight:600;color:#f2f4f8;line-height:1.6;margin-bottom:7px;}
+.wc-d-reset li b{color:#f6c453;font-weight:800;}
+.wc-d-reset li:last-child{margin-bottom:0;}
 .wc-d-search input{width:100%;padding:13px 16px 13px 40px;border-radius:13px;
   border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.09);color:#f2f4f8;
   font-size:14px;font-family:inherit;}
@@ -1069,7 +1076,7 @@ function App() {
 
   // ---- "What's new" notice on the login screen ----
   // Bump this string whenever the notice content changes, so returning players see it again once.
-  const WHATS_NEW_VERSION = "2026-06-20-v1";
+  const WHATS_NEW_VERSION = "2026-06-28-knockout-reset";
   const [whatsNewDismissed, setWhatsNewDismissedState] = useState(() => {
     try { return localStorage.getItem("wc26_whatsnew_dismissed") === WHATS_NEW_VERSION; }
     catch { return false; }
@@ -1799,18 +1806,19 @@ function App() {
             "Group-stage picks lock match by match \u2014 each one closes right when that game kicks off, so you can keep adjusting the rest anytime. Your knockout bracket, Golden Boot, and MVP picks lock all together when the knockout stage begins. If you're playing Quick Picks, that's everything you've entered.")
         ),
 
-        !whatsNewDismissed && e("div", {className: "wc-d-whatsnew mb-4"},
-          e("div", {className: "flex items-start justify-between gap-2 mb-2"},
-            e("span", {className: "wc-d-whatsnew-tag"}, "\u2728 What's new"),
-            e("button", {onClick: () => setWhatsNewDismissed(true), className: "wc-d-dim hover:text-white text-xs font-bold leading-none", style: {background: "none", border: "none", cursor: "pointer"}}, "\u2715")
+        !whatsNewDismissed && e("div", {className: "wc-d-reset mb-4"},
+          e("div", {className: "flex items-start justify-between gap-2"},
+            e("span", {className: "wc-d-reset-tag"}, "\uD83D\uDD04 Knockouts are live"),
+            e("button", {onClick: () => setWhatsNewDismissed(true), className: "wc-d-dim hover:text-white text-sm font-bold leading-none", style: {background: "none", border: "none", cursor: "pointer", marginTop: "2px"}}, "\u2715")
           ),
-          e("ul", {className: "text-xs space-y-1 list-disc pl-4", style: {color: "#d8d4ee"}},
-            e("li", null, "Joining is open the whole group stage now \u2014 jump in anytime before the knockouts start"),
-            e("li", null, "You can set a 3-digit PIN to stop others accidentally changing your picks"),
-            e("li", null, "Viewing a friend's picks is easier on mobile \u2014 a clear banner shows whose picks you're looking at"),
-            e("li", null, "The leaderboard now shows who everyone's backing to win it all"),
-            e("li", null, "A ticker at the bottom shows the latest results and leaderboard movement")
-          )
+          e("h3", null, "Group stage is done \u2014 the bracket has reset"),
+          e("ul", null,
+            e("li", null, e("b", null, "Real teams, not guesses:"), " the knockout bracket now uses the actual qualified teams, not whoever you predicted back in the group stage."),
+            e("li", null, e("b", null, "Fresh points, starting at zero:"), " your group stage score is locked in for good \u2014 the knockout bracket is a brand new tally from here to the Final."),
+            e("li", null, e("b", null, "Everyone's in:"), " whether you played Full Bracket or Quick Picks before, you can now fill in the knockout bracket."),
+            e("li", null, e("b", null, "Quick Picks players:"), " you can still change your Champion, Runner-up, 3rd and 4th picks any time \u2014 we'll grey out any team that's already out so you know to update it.")
+          ),
+          e("p", {style: {margin: "12px 0 0", fontSize: "14.5px", fontWeight: 700, color: "#f6c453", textAlign: "center"}}, "Have fun, and may the best team win! \u26BD")
         ),
 
         // Search / join input — dual purpose

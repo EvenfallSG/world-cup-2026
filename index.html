@@ -530,6 +530,33 @@ const KICKOFF = {
 const KNOCKOUT_LOCK = KOT(28, 16); // Jun 28, 16:00 UTC (= noon ET)
 const QP_KEYS = ["QP_WIN", "QP_RUN", "QP_3RD", "QP_4TH", "GOLDEN_BOOT", "MVP"];
 
+// ---- KNOCKOUT STAGE KICKOFF TIMES (Round of 32 — confirmed real fixtures, June 28 reset) ----
+// Unlike KOT() above, this spans the June/July boundary, so it takes an explicit month index
+// (5=June, 6=July) rather than hardcoding June. Compiled from NBC/Yahoo/SI/ESPN post-group-stage
+// schedules, cross-checked against the app's own verified slot/constraint solver (see THIRD_SLOTS
+// below) rather than trusting any single article's prose for ambiguous-sounding matchups.
+const KOT2 = (mo, d, h, mi) => Date.UTC(2026, mo, d, h, mi || 0);
+const KO_KICKOFF = {
+  M73: KOT2(5,28,19),   // South Africa v Canada
+  M76: KOT2(5,29,17),   // Brazil v Japan
+  M74: KOT2(5,29,20,30),// Germany v Sweden
+  M75: KOT2(5,30,1),    // Netherlands v Morocco
+  M78: KOT2(5,30,17),   // Ivory Coast v Norway
+  M77: KOT2(5,30,21),   // France v Paraguay
+  M79: KOT2(6,1,1),     // Mexico v Ecuador
+  M80: KOT2(6,1,16),    // England v Congo DR
+  M82: KOT2(6,1,20),    // Belgium v Algeria
+  M81: KOT2(6,2,0),     // USA v Bosnia-Herzegovina
+  M84: KOT2(6,2,19),    // Spain v Austria
+  M83: KOT2(6,2,23),    // Portugal v Croatia
+  M85: KOT2(6,3,3),     // Switzerland v Senegal
+  M88: KOT2(6,3,18),    // Australia v Egypt
+  M86: KOT2(6,3,22),    // Argentina v Cape Verde
+  M87: KOT2(6,4,1,30),  // Colombia v Ghana
+};
+// R16/QF/SF exact kickoff times aren't published yet (they depend on which teams advance) —
+// those rounds keep date-only display (the existing `d` field on R16/QF/SF) until FIFA confirms them.
+
 // Official FIFA 2026 bracket (Appendix A). T1-T8 = third-place slots with allowed groups.
 const THIRD_SLOTS = [
   {slot:"T1", allowed:"ABCDF"},  // M74: 1E v 3ABCDF
@@ -650,6 +677,74 @@ function calcStandings(pid, preds) {
   });
   const bestThirds = thirds.slice(0, 8);
   return {standings: st, qualified: q, bestThirds: bestThirds};
+}
+
+// ---- REAL BRACKET (knockout reset, June 28) ----
+// Mirrors calcStandings() exactly, but reads actual match results instead of a player's own
+// predictions. This is the single shared source of truth for who actually qualified — every
+// player's knockout bracket now points at the SAME real teams, instead of each player deriving
+// their own (possibly wrong) group-stage guesses the way the bracket worked before the reset.
+function calcRealStandings(results) {
+  const st = {};
+  Object.keys(GT).forEach(g => {
+    st[g] = GT[g].map(t => ({team:t, pts:0, played:0, w:0, d:0, l:0, gf:0, ga:0}));
+  });
+  GM.forEach(m => {
+    const sc = results[m.id];
+    if (!sc || !sc.includes("-")) return;
+    const parts = sc.split("-");
+    const gf = parseInt(parts[0]), ga = parseInt(parts[1]);
+    if (isNaN(gf) || isNaN(ga)) return;
+    const t1 = st[m.g].find(t => t.team === m.t1);
+    const t2 = st[m.g].find(t => t.team === m.t2);
+    if (!t1 || !t2) return;
+    t1.gf += gf; t1.ga += ga; t1.played++;
+    t2.gf += ga; t2.ga += gf; t2.played++;
+    if (gf > ga) { t1.pts += 3; t1.w++; t2.l++; }
+    else if (gf < ga) { t2.pts += 3; t2.w++; t1.l++; }
+    else { t1.pts++; t2.pts++; t1.d++; t2.d++; }
+  });
+  const q = {};
+  const thirds = [];
+  Object.keys(st).forEach(g => {
+    st[g].sort((a, b) => {
+      if (b.pts !== a.pts) return b.pts - a.pts;
+      const gdb = b.gf - b.ga, gda = a.gf - a.ga;
+      if (gdb !== gda) return gdb - gda;
+      return b.gf - a.gf;
+    });
+    q[g] = {first: st[g][0] ? st[g][0].team : null, second: st[g][1] ? st[g][1].team : null};
+    if (st[g][2] && st[g][2].played > 0) thirds.push({team: st[g][2].team, group: g, pts: st[g][2].pts, gf: st[g][2].gf, ga: st[g][2].ga});
+  });
+  thirds.sort((a, b) => {
+    if (b.pts !== a.pts) return b.pts - a.pts;
+    const gdb = b.gf - b.ga, gda = a.gf - a.ga;
+    if (gdb !== gda) return gdb - gda;
+    return b.gf - a.gf;
+  });
+  const bestThirds = thirds.slice(0, 8);
+  return {standings: st, qualified: q, bestThirds: bestThirds};
+}
+
+// Builds the single shared real-bracket slot map ({1A: "Mexico", 2A: "South Africa", ...,
+// T1: "Sweden", ...}) from actual results. Returns {} (all slots empty/TBD) until enough
+// results are in — bestThirds.length === 8 is the same readiness gate calcStandings already
+// uses for per-player guessed brackets, so the UI's existing "TBD" / "complete groups first"
+// messaging keeps working unchanged for the real bracket too.
+function getRealSlots(results) {
+  const {qualified, bestThirds} = calcRealStandings(results);
+  const slots = {};
+  Object.keys(qualified).forEach(g => {
+    slots["1" + g] = qualified[g].first;
+    slots["2" + g] = qualified[g].second;
+  });
+  if (bestThirds.length === 8) {
+    const assigned = assignThirds(bestThirds);
+    Object.keys(assigned).forEach(k => { slots[k] = assigned[k]; });
+  } else {
+    for (let i = 1; i <= 8; i++) slots["T" + i] = null;
+  }
+  return slots;
 }
 
 // Renders one ticker line. Measures its own text against the available width;
@@ -954,82 +1049,108 @@ function BracketWrap({ctx}) {
   );
 }
 
-// Mobile: simple stacked list, no horizontal scrolling needed — tap a round pill to switch.
-// This is the component whose remounting caused the reported "snaps back to far left" bug:
-// activeRound state was being reset to pickDefaultRound() on every App() re-render because
-// MobileBracket used to be a brand-new function every time, so React fully remounted it on
-// every ~8s poll. Now that it's a stable top-level function, activeRound persists normally.
+// Mobile: single chronological column, grouped by round — closer to how Wikipedia lays out
+// the knockout stage than the old round-picker-tabs version. Matches within Round of 32 are
+// sorted by their real confirmed kickoff time (KO_KICKOFF) and show date + local time, the
+// same way the group-stage "By Date" view already does. Later rounds (R16 onward) don't have
+// exact kickoff times published yet — FIFA confirms those once the previous round's winners
+// are known — so they stay sorted and labelled by date only, same as before.
+// Stable top-level function (not redefined per-render) for the same reason BracketWrap/
+// CentreCol are: redefining a component on every render gives it a new identity, so React
+// fully remounts and re-scrolls it on every ~8s poll instead of preserving scroll position.
 function MobileBracket({ctx, nowTick}) {
-  const {slots, gKO, getPred, sfLoser, renderBMatch, renderFinalMatch} = ctx;
+  const {slots, gKO, getPred, sfLoser, renderBMatch, renderFinalMatch, fmtKO} = ctx;
   const r32m = (id) => { const m = R32.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:slots[m.s1], t2:slots[m.s2], date:m.d, label:m.id}); };
   const kom  = (arr,id) => { const m = arr.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:gKO(m.f1), t2:gKO(m.f2), date:m.d, label:m.id, waitingOn:m.f1+" & "+m.f2}); };
 
-  const MOBILE_ROUNDS = [
-    {key:"r32", label:"Round of 32", range: roundDateRange(R32), render:() => [...R32_P1_IDS, ...R32_P2_IDS].map(id=>r32m(id))},
-    {key:"r16", label:"Round of 16", range: roundDateRange(R16), render:() => [...R16_P1_IDS, ...R16_P2_IDS].map(id=>kom(R16,id))},
-    {key:"qf",  label:"Quarter Finals", range: roundDateRange(QF), render:() => [...QF_P1_IDS, ...QF_P2_IDS].map(id=>kom(QF,id))},
-    {key:"sf",  label:"Semi Finals", range: roundDateRange(SF), render:() => [kom(SF,"M101"), kom(SF,"M102")]},
-    {key:"podium", label:"Bronze, Final & Podium", range: roundDateRange([{d:"Jul 18"},{d:"Jul 19"}]), render:() => {
-      const finalT1 = gKO("M101"), finalT2 = gKO("M102");
-      const champ   = gKO("M104");
-      const runner  = (champ&&finalT1&&finalT2) ? (champ===finalT1?finalT2:finalT1) : null;
-      const third   = gKO("M103");
-      return [
-        eGlobal("div",{key:"bronze-m", className:"mb-3"},
-          eGlobal("div",{className:"text-center text-[10px] font-extrabold text-amber-800 bg-orange-100 rounded-md py-1 mb-2"}, "BRONZE \u00B7 Jul 18"),
-          renderBMatch({mid:"M103",t1:sfLoser("M101"),t2:sfLoser("M102"),date:"Jul 18",label:"M103",waitingOn:"M101 & M102"})
-        ),
-        eGlobal("div",{key:"final-m", className:"mb-3"},
-          eGlobal("div",{className:"text-center text-[11px] font-extrabold text-white bg-gradient-to-r from-amber-500 to-orange-600 rounded-md py-1.5 mb-2"}, "\uD83C\uDFC6 FINAL \u00B7 Jul 19"),
-          renderFinalMatch({mid:"M104",t1:finalT1,t2:finalT2})
-        ),
-        eGlobal("div",{key:"podium-m", className:"rounded-xl p-3", style:{border:"2px solid #f59e0b", background:"linear-gradient(145deg,#fffbeb,#fef3c7)"}},
-          eGlobal("div",{className:"text-center text-[11px] font-extrabold text-amber-800 mb-2"}, "\uD83C\uDFC6 PODIUM"),
-          [["\uD83E\uDD47","Champion",champ],["\uD83E\uDD48","Runner-up",runner],["\uD83E\uDD49","3rd Place",third]].map(([medal,label,team]) =>
-            eGlobal("div",{key:label, className:"flex items-center gap-2 py-1"},
-              eGlobal("span",{className:"text-base"}, medal),
-              eGlobal("span",{className:"text-[10px] font-bold text-amber-700 w-20 flex-shrink-0"}, label),
-              eGlobal("span",{className:"text-sm font-bold " + (team?"text-blue-900":"text-gray-400 italic")}, team ? getFlag(team)+"\u00A0"+team : "TBD")
-            )
-          ),
-          eGlobal("div",{className:"border-t border-dashed border-amber-400 my-2"}),
-          [["\u26BD","Golden Boot",getPred("GOLDEN_BOOT")],["\u2B50","MVP",getPred("MVP")]].map(([icon,label,val]) =>
-            eGlobal("div",{key:label, className:"flex justify-between py-0.5"},
-              eGlobal("span",{className:"text-[10px] font-bold text-amber-700"}, icon+" "+label),
-              eGlobal("span",{className:"text-[11px] font-bold " + (val?"text-blue-900":"text-gray-400 italic")}, val||"TBD")
-            )
-          )
-        )
-      ];
-    }}
-  ];
+  const sectionHeader = (label) => eGlobal("div", {
+    className: "text-center text-[11px] font-extrabold tracking-wider text-white bg-blue-700 rounded-lg py-1.5 mb-2 mt-4 uppercase"
+  }, label);
 
-  // Pick whichever round is "live" right now (today falls inside its date range).
-  // If we're in a gap between rounds (yesterday's round just finished, tomorrow's
-  // hasn't started), land on the round that just finished rather than jumping ahead —
-  // that's usually what people want to check first. Before the knockouts begin at all,
-  // fall back to Round of 32 as the sensible starting point.
-  // NOTE: this only runs once, on mount (useState's lazy initializer) — exactly what we
-  // want now that MobileBracket has a stable identity and mounts only once per session.
-  const pickDefaultRound = () => {
-    const current = MOBILE_ROUNDS.find(r => r.range && nowTick >= r.range.start && nowTick <= r.range.end);
-    if (current) return current.key;
-    const ended = MOBILE_ROUNDS.filter(r => r.range && r.range.end < nowTick);
-    if (ended.length) return ended[ended.length - 1].key; // most recently finished
-    return MOBILE_ROUNDS[0].key; // tournament hasn't reached the knockouts yet
+  // One row per match: kickoff timestamp/date label sits above the existing match card,
+  // exactly like Wikipedia's knockout-stage table (date+venue, then the fixture below it).
+  const timedRow = (id, card) => {
+    const ms = KO_KICKOFF[id];
+    const label = ms ? fmtKO(ms) : null;
+    return eGlobal("div", {key: id, className: "mb-3"},
+      label && eGlobal("div", {className: "text-[10px] font-semibold text-blue-500 mb-1 pl-1"}, "\u23F1 " + label),
+      card
+    );
   };
 
-  const [activeRound, setActiveRound] = React.useState(pickDefaultRound);
-  const current = MOBILE_ROUNDS.find(r => r.key === activeRound) || MOBILE_ROUNDS[0];
-  return eGlobal("div", {className:"md:hidden"},
-    eGlobal("div", {className:"flex gap-1.5 mb-4 overflow-x-auto pb-1", style:{scrollbarWidth:"none"}},
-      MOBILE_ROUNDS.map(r => eGlobal("button", {
-        key:r.key, onClick:()=>setActiveRound(r.key),
-        className:"flex-shrink-0 px-3 py-1.5 rounded-full text-[11px] font-bold transition " +
-          (activeRound===r.key ? "bg-blue-600 text-white shadow" : "bg-blue-50 text-blue-700")
-      }, r.label))
+  // R32 has real per-match kickoff times — sort by those. Later rounds only have a date
+  // string (no time-of-day yet), so sort by that instead; ties keep their official match order.
+  const r32Sorted = R32.slice().sort((a, b) => (KO_KICKOFF[a.id] || 0) - (KO_KICKOFF[b.id] || 0));
+  const r16Sorted = R16.slice().sort((a, b) => (parseRoundDate(a.d) || 0) - (parseRoundDate(b.d) || 0));
+  const qfSorted  = QF.slice().sort((a, b) => (parseRoundDate(a.d) || 0) - (parseRoundDate(b.d) || 0));
+  const sfSorted  = SF.slice().sort((a, b) => (parseRoundDate(a.d) || 0) - (parseRoundDate(b.d) || 0));
+
+  const finalT1 = gKO("M101"), finalT2 = gKO("M102");
+  const champ   = gKO("M104");
+  const runner  = (champ && finalT1 && finalT2) ? (champ === finalT1 ? finalT2 : finalT1) : null;
+  const third   = gKO("M103");
+
+  // Lightweight jump-nav so people don't have to scroll past 16 R32 cards to reach the
+  // Final — a single row of anchor pills rather than the old full-width tab bar, since the
+  // list itself is now the primary view (this is just for quickly skipping ahead/back).
+  const SECTIONS = [
+    {id: "sec-r32", label: "R32"},
+    {id: "sec-r16", label: "R16"},
+    {id: "sec-qf", label: "QF"},
+    {id: "sec-sf", label: "SF"},
+    {id: "sec-final", label: "Final"},
+  ];
+  const jumpTo = (id) => {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({behavior: "smooth", block: "start"});
+  };
+
+  return eGlobal("div", {className: "md:hidden"},
+    eGlobal("div", {className: "flex gap-1.5 mb-1 overflow-x-auto pb-1", style: {scrollbarWidth: "none"}},
+      SECTIONS.map(s => eGlobal("button", {
+        key: s.id, onClick: () => jumpTo(s.id),
+        className: "flex-shrink-0 px-3 py-1 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 hover:bg-blue-100"
+      }, s.label))
     ),
-    eGlobal("div", {className:"space-y-2"}, current.render())
+
+    eGlobal("div", {id: "sec-r32"}, sectionHeader("Round of 32")),
+    r32Sorted.map(m => timedRow(m.id, r32m(m.id))),
+
+    eGlobal("div", {id: "sec-r16"}, sectionHeader("Round of 16")),
+    r16Sorted.map(m => timedRow(m.id, kom(R16, m.id))),
+
+    eGlobal("div", {id: "sec-qf"}, sectionHeader("Quarter Finals")),
+    qfSorted.map(m => timedRow(m.id, kom(QF, m.id))),
+
+    eGlobal("div", {id: "sec-sf"}, sectionHeader("Semi Finals")),
+    sfSorted.map(m => timedRow(m.id, kom(SF, m.id))),
+
+    eGlobal("div", {id: "sec-final"}, sectionHeader("Bronze, Final & Podium")),
+    eGlobal("div", {className: "mb-3"},
+      eGlobal("div", {className: "text-center text-[10px] font-extrabold text-amber-800 bg-orange-100 rounded-md py-1 mb-2"}, "BRONZE \u00B7 Jul 18"),
+      renderBMatch({mid: "M103", t1: sfLoser("M101"), t2: sfLoser("M102"), date: "Jul 18", label: "M103", waitingOn: "M101 & M102"})
+    ),
+    eGlobal("div", {className: "mb-3"},
+      eGlobal("div", {className: "text-center text-[11px] font-extrabold text-white bg-gradient-to-r from-amber-500 to-orange-600 rounded-md py-1.5 mb-2"}, "\uD83C\uDFC6 FINAL \u00B7 Jul 19"),
+      renderFinalMatch({mid: "M104", t1: finalT1, t2: finalT2})
+    ),
+    eGlobal("div", {className: "rounded-xl p-3", style: {border: "2px solid #f59e0b", background: "linear-gradient(145deg,#fffbeb,#fef3c7)"}},
+      eGlobal("div", {className: "text-center text-[11px] font-extrabold text-amber-800 mb-2"}, "\uD83C\uDFC6 PODIUM"),
+      [["\uD83E\uDD47", "Champion", champ], ["\uD83E\uDD48", "Runner-up", runner], ["\uD83E\uDD49", "3rd Place", third]].map(([medal, label, team]) =>
+        eGlobal("div", {key: label, className: "flex items-center gap-2 py-1"},
+          eGlobal("span", {className: "text-base"}, medal),
+          eGlobal("span", {className: "text-[10px] font-bold text-amber-700 w-20 flex-shrink-0"}, label),
+          eGlobal("span", {className: "text-sm font-bold " + (team ? "text-blue-900" : "text-gray-400 italic")}, team ? getFlag(team) + "\u00A0" + team : "TBD")
+        )
+      ),
+      eGlobal("div", {className: "border-t border-dashed border-amber-400 my-2"}),
+      [["\u26BD", "Golden Boot", getPred("GOLDEN_BOOT")], ["\u2B50", "MVP", getPred("MVP")]].map(([icon, label, val]) =>
+        eGlobal("div", {key: label, className: "flex justify-between py-0.5"},
+          eGlobal("span", {className: "text-[10px] font-bold text-amber-700"}, icon + " " + label),
+          eGlobal("span", {className: "text-[11px] font-bold " + (val ? "text-blue-900" : "text-gray-400 italic")}, val || "TBD")
+        )
+      )
+    )
   );
 }
 
@@ -1056,6 +1177,15 @@ function App() {
   // the real password has been verified server-side. There is no client-side
   // password constant anymore — the function is the only thing that knows it.
   const [adminToken, setAdminToken] = useState(null);
+  // ---- Knockout reset (June 28) admin panel state ----
+  // koResetPreview holds the last preview() response so the admin can see counts before
+  // committing. koResetStatus/koResetResult track the commit call itself. Two-step (preview
+  // then commit, with an explicit confirm click) so a destructive bulk wipe is never one
+  // accidental click away — same staging principle as the rest of the admin tools here.
+  const [koResetPreview, setKoResetPreview] = useState(null);
+  const [koResetConfirming, setKoResetConfirming] = useState(false);
+  const [koResetStatus, setKoResetStatus] = useState(null); // null | "previewing" | "committing" | "done" | "error"
+  const [koResetResult, setKoResetResult] = useState(null);
   const [syncStatus, setSyncStatus] = useState(null);
   const [lastSynced, setLastSynced] = useState(null);
   const recentEdits = useRef({});
@@ -1443,6 +1573,58 @@ function App() {
     }
   };
 
+  // ---- Knockout reset (June 28): preview then commit, via reset-knockout.js ----
+  // Same auth pattern as setResultViaFunction — sends the admin session token, never a
+  // password. preview() is read-only and safe to call as many times as needed; commit()
+  // is the one-time destructive step (snapshot old bracket picks, then wipe them) and is
+  // only reachable after an explicit confirm click in the UI below.
+  const koResetPreviewFn = async () => {
+    if (!adminToken) return;
+    setKoResetStatus("previewing");
+    try {
+      const r = await fetch("/.netlify/functions/reset-knockout", {
+        method: "POST",
+        body: JSON.stringify({ token: adminToken, mode: "preview" }),
+      });
+      const data = await r.json();
+      if (r.status === 401) {
+        setAdminMode(false); setAdminToken(null);
+        setAdminError("Session expired — please log in again");
+        setKoResetStatus(null);
+        return;
+      }
+      if (r.ok) { setKoResetPreview(data); setKoResetStatus(null); }
+      else { setKoResetStatus("error"); setKoResetResult(data.error || "Preview failed"); }
+    } catch {
+      setKoResetStatus("error"); setKoResetResult("Network error — try again");
+    }
+  };
+  const koResetCommitFn = async () => {
+    if (!adminToken) return;
+    setKoResetStatus("committing");
+    try {
+      const r = await fetch("/.netlify/functions/reset-knockout", {
+        method: "POST",
+        body: JSON.stringify({ token: adminToken, mode: "commit" }),
+      });
+      const data = await r.json();
+      if (r.status === 401) {
+        setAdminMode(false); setAdminToken(null);
+        setAdminError("Session expired — please log in again");
+        setKoResetStatus(null);
+        return;
+      }
+      if (r.ok) {
+        setKoResetStatus("done"); setKoResetResult(data);
+        setKoResetConfirming(false); setKoResetPreview(null);
+      } else {
+        setKoResetStatus("error"); setKoResetResult(data.error || "Reset failed");
+      }
+    } catch {
+      setKoResetStatus("error"); setKoResetResult("Network error — try again");
+    }
+  };
+
   // ---- Kickoff locking ----
   const isLockedKey = (mid) => {
     if (KICKOFF[mid]) return nowTick >= KICKOFF[mid];               // group match: locks at its own kickoff
@@ -1527,22 +1709,19 @@ function App() {
   const bestThirds = calcResult.bestThirds || [];
 
   const slotsRef = useRef({});
+  // ---- KNOCKOUT RESET (June 28): bracket now uses REAL qualified teams, not guesses ----
+  // Previously this useMemo derived slots from the active player's OWN predicted group
+  // standings (qualified/bestThirds from calcStandings(activeId, preds)) — meaning every
+  // player effectively played against their own private, possibly-wrong bracket. Now that
+  // the group stage is finished and frozen, every player shares one real bracket computed
+  // from actual results via getRealSlots(). calcStandings/qualified/bestThirds above remain
+  // unchanged and still power "My Group Overview" (a player's own predicted standings, kept
+  // for the historical record), but the knockout bracket itself no longer reads from them.
   const slots = useMemo(() => {
-    if (!activeId) return {};
-    const s = {};
-    Object.keys(qualified).forEach(g => {
-      s["1" + g] = qualified[g].first;
-      s["2" + g] = qualified[g].second;
-    });
-    if (bestThirds.length === 8) {
-      const assigned = assignThirds(bestThirds);
-      Object.keys(assigned).forEach(k => { s[k] = assigned[k]; });
-    } else {
-      for (let i = 0; i < 8; i++) { s["T" + (i + 1)] = null; }
-    }
+    const s = getRealSlots(results);
     slotsRef.current = s;
     return s;
-  }, [qualified, bestThirds, activeId]);
+  }, [results]);
 
   const e = React.createElement;
 
@@ -2138,10 +2317,10 @@ function App() {
       // module-scope bracket components need. Rebuilding this object every render is fine and
       // normal — only BracketWrap/CentreCol/MobileBracket's own function identity needs to stay
       // stable, which it now does since they're defined once at module scope (see above App()).
-      const bracketCtx = {slots, gKO, getPred, sfLoser, renderBMatch, renderFinalMatch};
+      const bracketCtx = {slots, gKO, getPred, sfLoser, renderBMatch, renderFinalMatch, fmtKO};
       tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
         e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Knockout Stages"),
-        e("p", {className: "text-gray-500 text-sm mb-4"}, "Official FIFA format: 12 group winners + 12 runners-up + 8 best third-placed teams. Teams auto-fill from your group predictions. " +
+        e("p", {className: "text-gray-500 text-sm mb-4"}, "Official FIFA format: 12 group winners + 12 runners-up + 8 best third-placed teams, now using the real qualified teams from the finished group stage. " +
           (bracketLocked ? "\uD83D\uDD12 The bracket is locked - the knockout stage is underway." : "All bracket picks lock when the knockout stage kicks off: " + fmtKO(KNOCKOUT_LOCK) + " (your local time).")),
         e("div", {className:"hidden md:block"}, e(BracketWrap, {key:"bwrap", ctx: bracketCtx})),
         e(MobileBracket, {key:"mbracket", ctx: bracketCtx, nowTick})
@@ -2424,6 +2603,53 @@ function App() {
           groupResultsSection,
           koResultsSection,
           awardsSection
+        ),
+
+        // ---- Knockout reset panel (admin only, June 28) ----
+        adminMode && e("div", {className: "mt-8 border-2 border-amber-400 rounded-2xl p-5 bg-amber-50"},
+          e("h3", {className: "text-lg font-bold text-amber-900 mb-1 flex items-center gap-2"},
+            e("span", null, "\uD83D\uDD04"), "Knockout Bracket Reset"
+          ),
+          e("p", {className: "text-xs text-amber-700 mb-4"},
+            "One-time action: wipes every player's old M73\u2013M104 bracket picks (made against their own guessed group standings) so everyone starts the real knockout bracket fresh. Group scores, Quick Picks, Golden Boot and MVP picks are never touched. A full backup is taken automatically before anything is deleted."
+          ),
+          !koResetConfirming && koResetStatus !== "done" && e("div", {className: "flex gap-2 flex-wrap items-center"},
+            e("button", {
+              onClick: koResetPreviewFn,
+              disabled: koResetStatus === "previewing",
+              className: "px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-bold hover:bg-amber-700 disabled:opacity-50"
+            }, koResetStatus === "previewing" ? "Checking\u2026" : "Preview reset"),
+            koResetPreview && e("button", {
+              onClick: () => setKoResetConfirming(true),
+              className: "px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-bold hover:bg-red-700"
+            }, "Proceed to reset \u2192")
+          ),
+          koResetPreview && !koResetConfirming && koResetStatus !== "done" && e("div", {className: "mt-3 text-sm text-amber-800 bg-white rounded-xl p-3 border border-amber-200"},
+            e("div", null, "Knockout pick keys found: ", e("b", null, koResetPreview.knockoutKeysFound), " (out of ", koResetPreview.totalPredictionKeys, " total prediction keys)"),
+            e("div", {className: "mt-1"}, "Existing backup snapshots already taken: ", e("b", null, koResetPreview.existingBackupSnapshots))
+          ),
+          koResetConfirming && koResetStatus !== "done" && e("div", {className: "mt-2 bg-white rounded-xl p-4 border-2 border-red-300"},
+            e("p", {className: "text-sm font-bold text-red-700 mb-3"},
+              "This will permanently clear ", koResetPreview ? koResetPreview.knockoutKeysFound : "all", " old bracket picks across every player (a backup snapshot is taken automatically first). This cannot be undone from the UI. Continue?"
+            ),
+            e("div", {className: "flex gap-2"},
+              e("button", {
+                onClick: koResetCommitFn,
+                disabled: koResetStatus === "committing",
+                className: "px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-bold hover:bg-red-700 disabled:opacity-50"
+              }, koResetStatus === "committing" ? "Resetting\u2026" : "Yes, reset the bracket now"),
+              e("button", {
+                onClick: () => setKoResetConfirming(false),
+                disabled: koResetStatus === "committing",
+                className: "px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300"
+              }, "Cancel")
+            )
+          ),
+          koResetStatus === "error" && e("p", {className: "mt-3 text-sm text-red-600 font-semibold"}, "\u26A0 " + koResetResult),
+          koResetStatus === "done" && e("div", {className: "mt-2 bg-emerald-50 border-2 border-emerald-300 rounded-xl p-4"},
+            e("p", {className: "text-sm font-bold text-emerald-800"}, "\u2705 Reset complete \u2014 wiped ", koResetResult.knockoutKeysWiped, " old bracket picks."),
+            e("p", {className: "text-xs text-emerald-600 mt-1"}, "Backup snapshot: ", koResetResult.backupSnapshot, " (stored at /predictionsBackup/", koResetResult.backupSnapshot, ")")
+          )
         )
       );
     }

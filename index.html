@@ -539,17 +539,17 @@ const KOT2 = (mo, d, h, mi) => Date.UTC(2026, mo, d, h, mi || 0);
 const KO_KICKOFF = {
   M73: KOT2(5,28,19),   // South Africa v Canada
   M76: KOT2(5,29,17),   // Brazil v Japan
-  M74: KOT2(5,29,20,30),// Germany v Sweden
+  M74: KOT2(5,29,20,30),// Germany v Paraguay
   M75: KOT2(5,30,1),    // Netherlands v Morocco
   M78: KOT2(5,30,17),   // Ivory Coast v Norway
-  M77: KOT2(5,30,21),   // France v Paraguay
+  M77: KOT2(5,30,21),   // France v Sweden
   M79: KOT2(6,1,1),     // Mexico v Ecuador
   M80: KOT2(6,1,16),    // England v Congo DR
-  M82: KOT2(6,1,20),    // Belgium v Algeria
+  M82: KOT2(6,1,20),    // Belgium v Senegal
   M81: KOT2(6,2,0),     // USA v Bosnia-Herzegovina
   M84: KOT2(6,2,19),    // Spain v Austria
   M83: KOT2(6,2,23),    // Portugal v Croatia
-  M85: KOT2(6,3,3),     // Switzerland v Senegal
+  M85: KOT2(6,3,3),     // Switzerland v Algeria
   M88: KOT2(6,3,18),    // Australia v Egypt
   M86: KOT2(6,3,22),    // Argentina v Cape Verde
   M87: KOT2(6,4,1,30),  // Colombia v Ghana
@@ -568,9 +568,42 @@ const THIRD_SLOTS = [
   {slot:"T7", allowed:"EFGIJ"},  // M85: 1B v 3EFGIJ
   {slot:"T8", allowed:"DEIJL"}   // M87: 1K v 3DEIJL
 ];
+// T-slot -> which group-winner (1-seed) it's paired against, per the fixed M73-M88 structure above.
+// (T1 always plays the Group E winner in M74, T2 always plays Group I winner in M77, etc.
+//  This pairing is fixed by the match list itself, independent of which thirds qualify.)
+const TSLOT_PARTNER_GROUP = {T1:"E", T2:"I", T3:"A", T4:"L", T5:"D", T6:"G", T7:"B", T8:"K"};
+// FIFA's Annex C publishes 495 possible combinations of which 8 third-place groups qualify,
+// each with ITS OWN fixed assignment of those thirds to T1-T8 — assignment is NOT "any valid
+// pairing satisfying the allowed-groups constraint" (a generic constraint solver finds *a*
+// valid solution, but not necessarily FIFA's actual one, since most combinations have more
+// than one constraint-satisfying assignment). This table hardcodes the actual combination that
+// occurred in this tournament (confirmed against Wikipedia's Annex C combination table and
+// cross-checked against live news reporting of real Round of 32 fixtures, e.g. Germany v
+// Paraguay, France v Sweden). Key = sorted qualifying groups joined with "", value = {1-seed
+// group: third-place group} pairing for that exact combination.
+const THIRD_COMBINATIONS = {
+  // Combination #67 in FIFA Annex C: thirds qualify from groups B, D, E, F, I, J, K, L.
+  "BDEFIJKL": {A:"E", B:"J", D:"B", E:"D", G:"I", I:"F", K:"L", L:"K"}
+};
 function assignThirds(thirds) {
   // thirds: [{team, group}] - the 8 best third-placed teams
-  // Returns {T1: teamName, ...} respecting allowed-group constraints via backtracking
+  const qualifyingGroups = thirds.map(t => t.group).slice().sort().join("");
+  const combo = THIRD_COMBINATIONS[qualifyingGroups];
+  if (combo) {
+    // Exact FIFA-confirmed assignment for this combination — authoritative.
+    const result = {};
+    Object.keys(TSLOT_PARTNER_GROUP).forEach(tslot => {
+      const oneGroup = TSLOT_PARTNER_GROUP[tslot];
+      const thirdGroup = combo[oneGroup];
+      const match = thirds.find(t => t.group === thirdGroup);
+      result[tslot] = match ? match.team : null;
+    });
+    return result;
+  }
+  // Fallback: this combination isn't hardcoded above. Constraint-solver backtracking finds
+  // A valid assignment, but NOT necessarily FIFA's actual one — multiple valid assignments
+  // usually exist for any given combination, so this is a best-effort approximation only,
+  // not authoritative. Add the real combination to THIRD_COMBINATIONS above once confirmed.
   const result = {};
   const used = new Array(thirds.length).fill(false);
   function bt(slotIdx) {
@@ -588,7 +621,6 @@ function assignThirds(thirds) {
     return false;
   }
   if (!bt(0)) {
-    // Fallback: assign in order if constraints unsatisfiable
     THIRD_SLOTS.forEach((s, i) => { result[s.slot] = thirds[i] ? thirds[i].team : null; });
   }
   return result;

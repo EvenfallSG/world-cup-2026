@@ -87,6 +87,9 @@ button{transition:all .15s ease;}
 .bmatch{border:1.5px solid #2a4a8f;border-radius:10px;overflow:hidden;background:white;box-shadow:0 3px 10px rgba(3,12,32,.12);transition:box-shadow .18s ease, transform .18s ease;}
 .bmatch:hover{box-shadow:0 8px 22px rgba(3,12,32,.22);transform:translateY(-1px);}
 .bmatch.final-card{border:2.5px solid #f59e0b;box-shadow:0 6px 28px rgba(245,158,11,.28),0 3px 12px rgba(3,12,32,.15);}
+.bmatch-correct{border-color:#16a34a;box-shadow:0 3px 10px rgba(22,163,74,.18);}
+.bmatch-wrong{border-color:#dc2626;box-shadow:0 3px 10px rgba(220,38,38,.18);}
+.bresult{padding:6px 8px;font-size:11px;font-weight:700;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;gap:6px;}
 .bteam{padding:9px 10px;font-size:12px;font-weight:600;color:#1e3a5f;background:#f0f9ff;border-bottom:1px solid #e2e8f0;}
 .bteam.final-card-team{padding:16px 14px;font-size:14px;font-weight:700;}
 .bteam.won{background:linear-gradient(90deg,#bbf7d0,#6ee7b7);color:#065f46;}
@@ -181,8 +184,26 @@ function getOutcome(score) {
   return "draw";
 }
 
+// ---- Knockout result format ----
+// Stored as "Winner|winnerScore-loserScore" or "Winner|winnerScore-loserScore|pens" for a
+// penalty-shootout win (90-minute score only — extra time is never shown, only whether
+// penalties decided it). Legacy entries written before this format existed are a bare
+// team name with no "|" at all ("Canada") — koResultWinner() handles both so old data
+// and the scoring function's exact-match check keep working unchanged.
+function koResultWinner(raw) {
+  if (!raw) return null;
+  return raw.includes("|") ? raw.split("|")[0] : raw;
+}
+function koResultParts(raw) {
+  // Returns {winner, score, pens} or null if raw has no score info (legacy/no-score entry).
+  if (!raw || !raw.includes("|")) return null;
+  const parts = raw.split("|");
+  return { winner: parts[0], score: parts[1] || null, pens: parts[2] === "pens" };
+}
+
 function calcPlayerScore(pid, preds, results, players) {
-  // results: { [matchId]: "2-1" or teamName for KO, GOLDEN_BOOT, MVP, QP_WIN/RUN/3RD/4TH }
+  // results: { [matchId]: "2-1" for group, "Winner|score[|pens]" for KO, teamName for
+  //   GOLDEN_BOOT/MVP/QP_WIN/RUN/3RD/4TH }
   // ---- KNOCKOUT RESET (June 28): group-stage and knockout scores are now tracked
   // separately, not as one blended running total. The group stage is finished and
   // frozen (see Group Stage Champions tab / freeze-group-stage.js) — groupTotal will
@@ -209,10 +230,11 @@ function calcPlayerScore(pid, preds, results, players) {
       }
     });
 
-    // Knockout matches (M73–M104): result stored as winning team name
+    // Knockout matches (M73–M104): result stored as "Winner|score[|pens]" — only the
+    // winner name matters for scoring, via koResultWinner().
     const KO_IDS = [...R32, ...R16, ...QF, ...SF, {id:"M103"}, {id:"M104"}].map(m => m.id);
     KO_IDS.forEach(mid => {
-      const actual = results[mid];
+      const actual = koResultWinner(results[mid]);
       const pred   = preds[pid + "-" + mid];
       if (!actual || !pred) return;
       if (actual === pred) { koTotal += SCORE_KO; breakdown.koCorrect += SCORE_KO; }
@@ -1883,10 +1905,38 @@ function App() {
       }
       action = e("div", {className: "bdisabled"}, msg);
     }
-    return e("div", {className: "bmatch", key: props.mid},
+    // Date: prefer the real confirmed KO_KICKOFF timestamp (R32 only, for now) over the
+    // static `d` field passed in via props — the static field has drifted out of sync with
+    // the real published times for several matches (e.g. M74's real kickoff is a day later
+    // than its `d` field says). R16+ have no real time published yet, so they keep `props.date`.
+    const dateLabel = KO_KICKOFF[props.mid] ? fmtKO(KO_KICKOFF[props.mid]) : props.date;
+    // Actual result line: shows once results[mid] exists, colored by whether the viewer's
+    // pick matched the real winner (green = correct, red = wrong, gray = no pick made).
+    const resParts = koResultParts(results[props.mid]);
+    const actualWinner = koResultWinner(results[props.mid]);
+    let resultLine = null;
+    if (actualWinner) {
+      const isCorrect = !!validPick && validPick === actualWinner;
+      const hasPick = !!validPick;
+      const colorStyle = isCorrect
+        ? {background: "#ecfdf5", color: "#047857"}
+        : hasPick
+        ? {background: "#fef2f2", color: "#b91c1c"}
+        : {background: "#f8fafc", color: "#475569"};
+      const scoreText = resParts && resParts.score
+        ? actualWinner + " won " + resParts.score + (resParts.pens ? " (pens)" : "")
+        : actualWinner + " won";
+      const pts = isCorrect ? SCORE_KO : 0;
+      resultLine = e("div", {className: "bresult", style: colorStyle},
+        e("span", null, scoreText),
+        e("span", null, (pts > 0 ? "+" : "") + pts)
+      );
+    }
+    return e("div", {className: "bmatch" + (actualWinner ? (validPick === actualWinner ? " bmatch-correct" : validPick ? " bmatch-wrong" : "") : ""), key: props.mid},
       e("div", {className: "bteam" + (validPick === props.t1 && props.t1 ? " won" : !props.t1 ? " tbd" : "")},
         props.t1 ? e("span", null, getFlag(props.t1) + "\u00A0" + props.t1) : "TBD"),
-      e("div", {className: "bvs"}, props.label + " - " + props.date),
+      e("div", {className: "bvs"}, props.label + " - " + dateLabel),
+      resultLine,
       e("div", {className: "bteam" + (validPick === props.t2 && props.t2 ? " won" : !props.t2 ? " tbd" : "")},
         props.t2 ? e("span", null, getFlag(props.t2) + "\u00A0" + props.t2) : "TBD"),
       action
@@ -1914,10 +1964,31 @@ function App() {
       action = e("div",{className:"bdisabled"}, pr ? "Picked: "+pr : "No pick yet");
     else
       action = e("div",{className:"bdisabled"}, "Awaiting SF winners");
+    const resParts = koResultParts(results[props.mid]);
+    const actualWinner = koResultWinner(results[props.mid]);
+    let resultLine = null;
+    if (actualWinner) {
+      const isCorrect = !!validPick && validPick === actualWinner;
+      const hasPick = !!validPick;
+      const colorStyle = isCorrect
+        ? {background: "#ecfdf5", color: "#047857"}
+        : hasPick
+        ? {background: "#fef2f2", color: "#b91c1c"}
+        : {background: "#f8fafc", color: "#475569"};
+      const scoreText = resParts && resParts.score
+        ? actualWinner + " won " + resParts.score + (resParts.pens ? " (pens)" : "")
+        : actualWinner + " won";
+      const pts = isCorrect ? SCORE_QP.QP_WIN : 0;
+      resultLine = e("div", {className: "bresult", style: colorStyle},
+        e("span", null, scoreText),
+        e("span", null, (pts > 0 ? "+" : "") + pts)
+      );
+    }
     return e("div", {className:"bmatch final-card"},
       e("div", {className:"bteam final-card-team"+(validPick===props.t1&&props.t1?" won":!props.t1?" tbd":"")},
         props.t1 ? getFlag(props.t1)+"\u00A0"+props.t1 : "TBD"),
       e("div", {className:"bvs final-card-vs"}, "\uD83C\uDFC6 FINAL \u00B7 Jul 19"),
+      resultLine,
       e("div", {className:"bteam final-card-team"+(validPick===props.t2&&props.t2?" won":!props.t2?" tbd":"")},
         props.t2 ? getFlag(props.t2)+"\u00A0"+props.t2 : "TBD"),
       action
@@ -2541,22 +2612,42 @@ function App() {
 
     // ---- RESULTS TAB ----
     if (tab === "results") {
-      const setResult = async (key, val) => {
+      // Parses free-form admin input for a KO match into the canonical "Winner|score[|pens]"
+      // storage format. Accepts "Canada 1-0", "Canada 1-0 pens", or a bare "Canada" (no
+      // score yet) — admin can fill in the score later without re-typing the winner.
+      // Group matches and awards/podium pass straight through unchanged (parseAsKO=false).
+      const parseKOInput = (raw) => {
+        const trimmed = raw.trim();
+        if (!trimmed) return trimmed;
+        const pensMatch = /\s+pens?$/i.test(trimmed);
+        const withoutPens = trimmed.replace(/\s+pens?$/i, "").trim();
+        const scoreMatch = withoutPens.match(/^(.*?)\s+(\d+\s*-\s*\d+)$/);
+        if (!scoreMatch) return trimmed; // no score yet, e.g. just "Canada" — store as-is
+        const winner = scoreMatch[1].trim();
+        const score = scoreMatch[2].replace(/\s+/g, "");
+        return winner + "|" + score + (pensMatch ? "|pens" : "");
+      };
+
+      const setResult = async (key, val, isKO) => {
         if (!adminMode) return;
-        const cleaned = val.trim();
+        const cleaned = isKO ? parseKOInput(val) : val.trim();
         setResults(prev => ({...prev, [key]: cleaned}));
         await setResultViaFunction(key, cleaned);
       };
 
-      const resultInput = (matchId, placeholder, isScore) => {
+      // Admin sees/edits the raw stored format directly for KO matches (so they can see
+      // exactly what's saved, including any score), but a hint placeholder shows the
+      // expected free-form input pattern.
+      const resultInput = (matchId, placeholder, isScore, isKO) => {
         const actual = results[matchId] || "";
         const hasResult = !!actual;
+        const displayVal = isKO ? actual.replace(/\|/g, " ") : actual;
         return e("div", {key: matchId, className: "relative"},
           adminMode
             ? e("input", {
                 type: "text",
-                value: actual,
-                onChange: ev => setResult(matchId, ev.target.value),
+                value: displayVal,
+                onChange: ev => setResult(matchId, ev.target.value, isKO),
                 placeholder: placeholder,
                 className: "w-full px-2 py-1.5 border-2 " +
                   (hasResult ? "border-emerald-400 bg-emerald-50 font-bold text-emerald-800" :
@@ -2566,7 +2657,7 @@ function App() {
             : e("div", {className: "px-2 py-1.5 rounded text-center text-sm font-mono font-bold " +
                 (hasResult ? "bg-emerald-100 text-emerald-800 border border-emerald-300" :
                 "bg-gray-100 text-gray-400 border border-gray-200 italic")},
-                hasResult ? actual : "—"
+                hasResult ? (isKO ? displayVal : actual) : "—"
               )
         );
       };
@@ -2664,7 +2755,7 @@ function App() {
                   return e("div", {key: m.id, className: "flex items-center gap-2"},
                     e("div", {className: "flex-1 text-[10px] text-gray-500 font-semibold"},
                       getFlag(m.t1) + " " + m.t1.split(" ").pop() + " v " + getFlag(m.t2) + " " + m.t2.split(" ").pop()),
-                    e("div", {className: "w-20"}, resultInput(m.id, "2-1", true))
+                    e("div", {className: "w-20"}, resultInput(m.id, "2-1", true, false))
                   );
                 })
               ),
@@ -2690,7 +2781,7 @@ function App() {
           e("span", {className: "text-2xl"}, "\uD83C\uDFC6"),
           "Knockout Stage Results"
         ),
-        e("p", {className: "text-xs text-gray-500 mb-3"}, "Enter the name of the winning team for each match."),
+        e("p", {className: "text-xs text-gray-500 mb-3"}, "Auto-fills from the live score sync where possible. To enter or correct one by hand: type \u201cTeam score\u201d (e.g. \u201cCanada 1-0\u201d), adding \u201cpens\u201d if penalties decided it (e.g. \u201cFrance 2-2 pens\u201d)."),
         [
           {label:"Round of 32", matches: R32},
           {label:"Round of 16", matches: R16},
@@ -2705,7 +2796,7 @@ function App() {
                 const lbl = m.label || m.id;
                 return e("div", {key: m.id, className: "bg-blue-50 rounded-lg p-2"},
                   e("div", {className: "text-[10px] font-bold text-gray-500 mb-1 text-center"}, lbl),
-                  resultInput(m.id, "Winner…", false)
+                  resultInput(m.id, "Team 1-0", false, true)
                 );
               })
             )
@@ -2730,7 +2821,7 @@ function App() {
           ].map(item =>
             e("div", {key: item.key, className: "flex items-center gap-3 bg-amber-50 rounded-xl p-3"},
               e("div", {className: "text-sm font-bold text-amber-800 w-36"}, item.label),
-              e("div", {className: "flex-1"}, resultInput(item.key, "Name…", false))
+              e("div", {className: "flex-1"}, resultInput(item.key, "Name…", false, false))
             )
           )
         )

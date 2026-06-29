@@ -348,12 +348,20 @@ async function fetchAndApplySync() {
     if (t1.match(/^[0-9W]/) || t2.match(/^[0-9W]/)) return;
 
     let winner = null;
+    const wentToPens = !!sc.p;
     if (sc.p) {
       winner = sc.p[0] > sc.p[1] ? t1 : t2;
     } else if (ft[0] !== ft[1]) {
       winner = ft[0] > ft[1] ? t1 : t2;
     }
     if (!winner) return; // draw with no penalty shootout recorded — nothing to write yet
+
+    // Stored result format: "Winner|winnerScore-loserScore[|pens]" — always the 90-minute
+    // (ft) score regardless of whether extra time was played; "pens" appended only if
+    // penalties decided it. winner === t1 vs t2 tells us which side of `ft` is the winner's.
+    const winnerScore = winner === t1 ? ft[0] : ft[1];
+    const loserScore = winner === t1 ? ft[1] : ft[0];
+    const resultString = winner + "|" + winnerScore + "-" + loserScore + (wentToPens ? "|pens" : "");
 
     const round = (m.round || "").toLowerCase();
     let bucket = null;
@@ -374,8 +382,11 @@ async function fetchAndApplySync() {
       const teamsMatch =
         (teams.t1 === t1 && teams.t2 === t2) || (teams.t1 === t2 && teams.t2 === t1);
       if (!teamsMatch) continue;
-      updates[bm.id] = winner;
-      liveResults[bm.id] = winner; // so later rounds in this same run can resolve off it
+      updates[bm.id] = resultString;
+      // liveResults keeps the BARE winner name (not the "Winner|score" string) so that
+      // resolveKOTeams()'s downstream equality checks against team names keep working
+      // when resolving later rounds within this same sync run.
+      liveResults[bm.id] = winner;
       break;
     }
   });

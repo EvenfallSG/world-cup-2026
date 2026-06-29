@@ -165,10 +165,11 @@ const fbSetResult = async (key, val) => {
 // ---- SCORING RULES ----
 // Group stage: 3pts exact score, 1pt correct outcome (W/D/L)
 // Knockout: 2pts correct winner
-// Quick Picks: Champion=5, Runner-up=3, 3rd=2, 4th=1
+// Knockout reset (June 28+): only "correct winner" picks remain (1pt each).
+// Quick Picks / podium bonus: Champion=3, Runner-up=1, 3rd=2, 4th=1
 // Golden Boot / MVP: 3pts each
-const SCORE_EXACT = 3, SCORE_OUTCOME = 1, SCORE_KO = 2;
-const SCORE_QP = {QP_WIN:5, QP_RUN:3, QP_3RD:2, QP_4TH:1, GOLDEN_BOOT:3, MVP:3};
+const SCORE_EXACT = 3, SCORE_OUTCOME = 1, SCORE_KO = 1;
+const SCORE_QP = {QP_WIN:3, QP_RUN:1, QP_3RD:2, QP_4TH:1, GOLDEN_BOOT:3, MVP:3};
 
 function getOutcome(score) {
   // score like "2-1" → "home" | "away" | "draw" | null
@@ -536,10 +537,19 @@ const KICKOFF = {
   H5:KOT(27,0),  H6:KOT(27,0),  L3:KOT(27,21), L4:KOT(27,21),
   K5:KOT(27,23,30), K6:KOT(27,23,30), J3:KOT(28,2), J4:KOT(28,2)
 };
-// Bracket picks, Quick Picks and award picks all lock when the knockout stage kicks off (Round of 32, Jun 28).
-// Adjust this single constant if FIFA's first R32 kickoff differs.
-const KNOCKOUT_LOCK = KOT(28, 16); // Jun 28, 16:00 UTC (= noon ET)
+// NOTE (knockout-mechanics fix, post-reset): KNOCKOUT_LOCK originally locked the ENTIRE
+// bracket (every R32–Final match) the instant the very first R32 game kicked off — that
+// was a bug, not the intended design. The intended mechanic (same as the group stage) is
+// per-match locking: a match locks only once IT kicks off, via KO_KICKOFF below for R32
+// (real published times) and, once FIFA publishes them, real times for R16/QF/SF/Final too.
+// KNOCKOUT_LOCK is kept only for registration close (regOpen()) and the "Joining open
+// until..." message — it no longer gates individual match editability anywhere.
+const KNOCKOUT_LOCK = KOT(28, 16); // Jun 28, 16:00 UTC (= noon ET) — R32's first kickoff
 const QP_KEYS = ["QP_WIN", "QP_RUN", "QP_3RD", "QP_4TH", "GOLDEN_BOOT", "MVP"];
+// Quick Picks (podium guesses) + Golden Boot + MVP get their own standalone deadline,
+// independent of any match lock, so people who hadn't gotten to these yet have a full
+// week's notice rather than being swept into the bracket's per-match locking.
+const QP_LOCK = Date.UTC(2026, 6, 6, 15); // Jul 6, 2026, 15:00 UTC (month 6 = July)
 
 // ---- KNOCKOUT STAGE KICKOFF TIMES (Round of 32 — confirmed real fixtures, June 28 reset) ----
 // Unlike KOT() above, this spans the June/July boundary, so it takes an explicit month index
@@ -1742,13 +1752,21 @@ function App() {
   };
 
   // ---- Kickoff locking ----
+  // Per-match locking, same principle as the group stage: a pick locks only once ITS OWN
+  // match kicks off (or, for awards/podium picks, only at the standalone QP_LOCK deadline) —
+  // never as a blanket "the whole bracket locks the moment R32 starts" rule. That blanket
+  // version was the bug being fixed here: it had locked R16/QF/SF/Bronze/Final (and even
+  // not-yet-played R32 matches) the instant the FIRST R32 game kicked off, weeks early.
   const isLockedKey = (mid) => {
-    if (KICKOFF[mid]) return nowTick >= KICKOFF[mid];               // group match: locks at its own kickoff
-    if (mid === "MODE") return false;                                // play mode is never locked
-    if (QP_KEYS.indexOf(mid) !== -1 || /^M\d+$/.test(mid)) return nowTick >= KNOCKOUT_LOCK; // bracket + quick picks + awards
+    if (KICKOFF[mid]) return nowTick >= KICKOFF[mid];                // group match: locks at its own kickoff
+    if (mid === "MODE") return false;                                 // play mode is never locked
+    if (QP_KEYS.indexOf(mid) !== -1) return nowTick >= QP_LOCK;        // awards + podium picks: standalone 7-day window
+    if (/^M\d+$/.test(mid)) {
+      if (KO_KICKOFF[mid]) return nowTick >= KO_KICKOFF[mid];         // R32 with a real published kickoff: locks at kickoff
+      return false;                                                    // R16/QF/SF/Bronze/Final: no time published yet — stays open
+    }
     return false;
   };
-  const bracketLocked = nowTick >= KNOCKOUT_LOCK;
 
   const setPred = (mid, val) => {
     if (isRO || !pid || isLockedKey(mid)) return;
@@ -1846,12 +1864,13 @@ function App() {
     const opts = [props.t1, props.t2].filter(Boolean);
     let action;
     const validPick = opts.indexOf(pr) !== -1 ? pr : "";
-    if (opts.length === 2 && !isRO && !bracketLocked) {
+    const mLocked = isLockedKey(props.mid);
+    if (opts.length === 2 && !isRO && !mLocked) {
       action = e("select", {value: validPick, onChange: ev => setKO(props.mid, ev.target.value), className: "bsel"},
         e("option", {value: ""}, props.isF ? "Pick champion" : "Pick winner"),
         opts.map(t => e("option", {key: t, value: t}, t))
       );
-    } else if (opts.length === 2 && !isRO && bracketLocked) {
+    } else if (opts.length === 2 && !isRO && mLocked) {
       action = e("div", {className: "bdisabled"}, pr ? "\uD83D\uDD12 Locked: " + pr : "\uD83D\uDD12 Locked - no pick");
     } else if (opts.length === 2 && isRO) {
       action = e("div", {className: "bdisabled"}, pr ? "Picked: " + pr : "No pick yet");
@@ -1882,13 +1901,14 @@ function App() {
     const pr = getPred(props.mid);
     const opts = [props.t1, props.t2].filter(Boolean);
     const validPick = opts.indexOf(pr) !== -1 ? pr : "";
+    const mLocked = isLockedKey(props.mid);
     let action;
-    if (opts.length === 2 && !isRO && !bracketLocked)
+    if (opts.length === 2 && !isRO && !mLocked)
       action = e("select", {value:validPick, onChange:ev=>setKO(props.mid,ev.target.value), className:"bsel"},
         e("option",{value:""},"Pick champion"),
         opts.map(t=>e("option",{key:t,value:t},t))
       );
-    else if (opts.length === 2 && !isRO && bracketLocked)
+    else if (opts.length === 2 && !isRO && mLocked)
       action = e("div",{className:"bdisabled"}, pr ? "\uD83D\uDD12 "+pr : "\uD83D\uDD12 Locked - no pick");
     else if (opts.length === 2 && isRO)
       action = e("div",{className:"bdisabled"}, pr ? "Picked: "+pr : "No pick yet");
@@ -2004,10 +2024,9 @@ function App() {
         ),
 
         e("div", {className: "wc-d-card rounded-2xl p-3.5 mb-6 flex flex-wrap gap-2 justify-center text-[11px] font-bold"},
-          e("span", {className: "wc-d-dim mr-1 self-center"}, "Scoring:"),
-          [["Exact", "3", "rgba(79,214,160,.18)", "#7ef0c0"], ["Result", "1", "rgba(99,179,237,.18)", "#9fd0ff"],
-           ["KO", "2", "rgba(167,139,250,.18)", "#cdbcff"], ["Champion", "5", "rgba(246,196,83,.18)", "#f6c453"],
-           ["Runner-up", "3", "rgba(245,158,11,.18)", "#fcd34d"], ["3rd/4th", "2/1", "rgba(251,146,60,.18)", "#fdba74"],
+          e("span", {className: "wc-d-dim mr-1 self-center"}, "KO Scoring:"),
+          [["Correct Result", "1", "rgba(167,139,250,.18)", "#cdbcff"], ["Champion", "3", "rgba(246,196,83,.18)", "#f6c453"],
+           ["Runner-up", "1", "rgba(245,158,11,.18)", "#fcd34d"], ["3rd/4th", "2/1", "rgba(251,146,60,.18)", "#fdba74"],
            ["Boot/MVP", "3 ea", "rgba(244,114,182,.18)", "#ffaede"]].map(([l, v, bg, col]) =>
             e("span", {key: l, className: "lb-chip", style: {background: bg, color: col, padding: "3px 9px"}}, l + " " + v))
         ),
@@ -2066,7 +2085,7 @@ function App() {
     mainView = e("div", {className: "max-w-lg mx-auto"},
       // Hero: title + live next-kickoff countdown (no card — sits directly on the page background)
       e("div", {className: "text-center mb-6"},
-        e("span", {className: "wc-d-eyebrow"}, e("span", {className: "dot"}), "Group stage \u00b7 live"),
+        e("span", {className: "wc-d-eyebrow"}, e("span", {className: "dot"}), "\uD83E\uDD4A Knockout Stages \u00b7 Live"),
         nextKickoffs.length > 0 && e("div", {className: "flex justify-center gap-2 mt-4"},
           (() => {
             const ms = KICKOFF[nextKickoffs[0].id] - nowTick;
@@ -2295,7 +2314,7 @@ function App() {
         ),
         e("p", {className: "text-gray-500 text-sm mb-6"}, 'Enter scores as "2-1". Kickoff times are shown in your local time — each match locks automatically at kickoff.'),
         e("div", {className: "bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-xl p-4 mb-6"},
-          e("h3", {className: "text-base font-bold text-orange-700 mb-3"}, "Special Predictions" + (awardLock ? " \u00b7 \uD83D\uDD12 locked (knockout stage underway)" : "")),
+          e("h3", {className: "text-base font-bold text-orange-700 mb-3"}, "Special Predictions" + (awardLock ? " \u00b7 \uD83D\uDD12 locked" : "")),
           e("div", {className: "grid grid-cols-1 md:grid-cols-2 gap-4"},
             e("div", null,
               e("label", {className: "block text-sm font-bold text-orange-700 mb-1"}, "Golden Boot (Top Scorer)"),
@@ -2320,12 +2339,13 @@ function App() {
         matchesView
       );
     } else if (tab === "quick") {
+      const qpLocked = isLockedKey("QP_WIN"); // all QP_KEYS share one deadline (QP_LOCK) — any one represents all
       const teamSel = (lbl, key, accent) => e("div", {key: key},
         e("label", {className: "block text-sm font-bold mb-1 " + (accent || "text-blue-900")}, lbl),
         e("select", {
           value: getPred(key),
           onChange: ev => setKO(key, ev.target.value),
-          disabled: isRO || bracketLocked,
+          disabled: isRO || qpLocked,
           className: "w-full px-3 py-2 border-2 border-blue-300 rounded-lg text-sm bg-white focus:outline-none focus:border-blue-600"
         },
           e("option", {value: ""}, "Select team..."),
@@ -2335,8 +2355,8 @@ function App() {
       tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
         e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Quick Picks"),
         e("div", {className: "flex items-start justify-between gap-3 flex-wrap mb-6"},
-          e("p", {className: "text-gray-500 text-sm flex-1"}, "The casual route: call the podium and the individual awards. No bracket required. Quick Picks lock for everyone when the knockout stage kicks off (" + fmtKO(KNOCKOUT_LOCK) + " your time)."),
-          !isRO && !bracketLocked && e("button", {
+          e("p", {className: "text-gray-500 text-sm flex-1"}, "The casual route: call the podium and the individual awards. No bracket required. Quick Picks lock " + fmtKO(QP_LOCK) + " (your local time)."),
+          !isRO && !qpLocked && e("button", {
             onClick: () => {
               const shuffle = arr => arr.slice().sort(() => Math.random() - 0.5);
               const t = shuffle(ALL_TEAMS); const p = shuffle(ALL_TEAMS);
@@ -2348,8 +2368,8 @@ function App() {
             className: "flex-shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white text-sm font-bold shadow-lg hover:shadow-xl hover:scale-105 transition-all"
           }, "🎲 Re-roll C.B.F.")
         ),
-        bracketLocked && e("div", {className: "bg-gray-100 border border-gray-300 rounded-xl p-3 mb-4 text-sm font-semibold text-gray-600"},
-          "\uD83D\uDD12 Quick Picks are locked - the knockout stage is underway."),
+        qpLocked && e("div", {className: "bg-gray-100 border border-gray-300 rounded-xl p-3 mb-4 text-sm font-semibold text-gray-600"},
+          "\uD83D\uDD12 Quick Picks are locked."),
         e("div", {className: "max-w-xl"},
           e("div", {className: "grid grid-cols-1 md:grid-cols-2 gap-4 mb-6"},
             teamSel("CHAMPION", "QP_WIN", "text-amber-600"),
@@ -2365,7 +2385,7 @@ function App() {
                 e("input", {
                   type: "text", value: getPred("GOLDEN_BOOT"),
                   onChange: ev => setPred("GOLDEN_BOOT", ev.target.value),
-                  readOnly: isRO || bracketLocked, placeholder: "e.g. Mbappe",
+                  readOnly: isRO || qpLocked, placeholder: "e.g. Mbappe",
                   className: "w-full px-3 py-2 border-2 border-orange-300 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-white"
                 })
               ),
@@ -2374,7 +2394,7 @@ function App() {
                 e("input", {
                   type: "text", value: getPred("MVP"),
                   onChange: ev => setPred("MVP", ev.target.value),
-                  readOnly: isRO || bracketLocked, placeholder: "e.g. Vinicius Jr",
+                  readOnly: isRO || qpLocked, placeholder: "e.g. Vinicius Jr",
                   className: "w-full px-3 py-2 border-2 border-orange-300 rounded-lg text-sm focus:outline-none focus:border-orange-500 bg-white"
                 })
               )
@@ -2437,7 +2457,7 @@ function App() {
       tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
         e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Knockout Stages"),
         e("p", {className: "text-gray-500 text-sm mb-4"}, "Official FIFA format: 12 group winners + 12 runners-up + 8 best third-placed teams, now using the real qualified teams from the finished group stage. " +
-          (bracketLocked ? "\uD83D\uDD12 The bracket is locked - the knockout stage is underway." : "All bracket picks lock when the knockout stage kicks off: " + fmtKO(KNOCKOUT_LOCK) + " (your local time).")),
+          "Each match locks on its own once it kicks off \u2014 everything else stays open right up until then."),
         e("div", {className:"hidden md:block"}, e(BracketWrap, {key:"bwrap", ctx: bracketCtx})),
         e(MobileBracket, {key:"mbracket", ctx: bracketCtx, nowTick})
       );

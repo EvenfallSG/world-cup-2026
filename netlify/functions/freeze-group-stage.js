@@ -91,7 +91,7 @@ exports.handler = async function (event) {
     return { statusCode: 400, headers, body: JSON.stringify({ error: "Invalid JSON body" }) };
   }
 
-  const { token, mode, podium } = payload;
+  const { token, mode, podium, force } = payload;
 
   if (!verifyToken(token, ADMIN_TOKEN_SECRET)) {
     return { statusCode: 401, headers, body: JSON.stringify({ error: "Session expired or invalid — please log in again" }) };
@@ -120,12 +120,16 @@ exports.handler = async function (event) {
     }
 
     // mode === "commit"
-    if (existing) {
+    // By default this refuses to overwrite an existing snapshot, same as before. Passing
+    // force:true (set by an explicit, deliberate admin action — e.g. re-freezing with a
+    // larger podium size) allows exactly one overwrite. The previous snapshot is kept
+    // alongside the new one as `previousSnapshot` so nothing is silently lost.
+    if (existing && !force) {
       return {
         statusCode: 409,
         headers,
         body: JSON.stringify({
-          error: "Group Stage is already frozen — refusing to overwrite.",
+          error: "Group Stage is already frozen — refusing to overwrite. Pass force:true to deliberately replace it.",
           existing,
         }),
       };
@@ -139,6 +143,9 @@ exports.handler = async function (event) {
       frozenAt: new Date().toISOString(),
       podium, // [{id, name, total, breakdown}, ...] as computed client-side by calcAllScores
     };
+    if (existing && force) {
+      record.previousSnapshot = existing; // keep the prior frozen record for traceability
+    }
     await db.ref("groupStageFinal").set(record);
 
     return {

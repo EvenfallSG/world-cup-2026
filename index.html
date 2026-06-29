@@ -1405,17 +1405,78 @@ function App() {
     if (!started) return [];
     const items = [];
 
-    // Most recent group result with a kickoff time (so we can find the latest chronologically)
-    const playedGroup = GM.filter(m => results[m.id] && KICKOFF[m.id]);
-    if (playedGroup.length) {
-      const latest = playedGroup.slice().sort((a, b) => KICKOFF[b.id] - KICKOFF[a.id])[0];
-      items.push({icon: "\uD83C\uDFC1", text: latest.t1 + " " + results[latest.id].replace("-", " - ") + " " + latest.t2 + " \u00b7 Full Time"});
+    // ---- "Latest result" + "Next match" now look at the KNOCKOUT stage first ----
+    // The group stage is over and frozen (see Group Stage Champions); once any KO match
+    // has a real kickoff time, that's what's actually happening, so the ticker should
+    // talk about the bracket, not replay June's group fixtures forever.
+    const ALL_KO = [...R32, ...R16, ...QF, ...SF, {id:"M103"}, {id:"M104"}];
+
+    // Real, fact-based bracket slots derived from ACTUAL results (not any one player's
+    // picks) — reuses the same calcStandings()/assignThirds() the rest of the app trusts,
+    // just fed results-as-predictions under a synthetic pid so it only ever reflects truth.
+    const actualSlots = (() => {
+      const synthPreds = {};
+      GM.forEach(m => { if (results[m.id]) synthPreds["__actual__-" + m.id] = results[m.id]; });
+      const { qualified, bestThirds } = calcStandings("__actual__", synthPreds);
+      const s = {};
+      Object.keys(qualified).forEach(g => {
+        s["1" + g] = qualified[g].first;
+        s["2" + g] = qualified[g].second;
+      });
+      if (bestThirds.length === 8) Object.assign(s, assignThirds(bestThirds));
+      return s;
+    })();
+    const r32TeamName = (slotCode) => actualSlots[slotCode] || null;
+
+    // Most recent KO result with a real kickoff time
+    const playedKO = ALL_KO.filter(m => results[m.id] && KO_KICKOFF[m.id]);
+    let latestKOItem = null;
+    if (playedKO.length) {
+      const latest = playedKO.slice().sort((a, b) => KO_KICKOFF[b.id] - KO_KICKOFF[a.id])[0];
+      const parts = koResultParts(results[latest.id]);
+      const winner = koResultWinner(results[latest.id]);
+      const r32 = R32.find(m => m.id === latest.id);
+      let oppLine = winner;
+      if (r32) {
+        const t1 = r32TeamName(r32.s1), t2 = r32TeamName(r32.s2);
+        if (t1 && t2) {
+          const loser = winner === t1 ? t2 : (winner === t2 ? t1 : null);
+          if (loser) oppLine = winner + (parts && parts.score ? " " + parts.score : "") + " " + loser + (parts && parts.pens ? " (pens)" : "");
+        }
+      }
+      if (oppLine === winner && parts && parts.score) oppLine = winner + " win " + parts.score + (parts.pens ? " (pens)" : "");
+      else if (oppLine === winner) oppLine = winner + " win";
+      latestKOItem = {icon: "\uD83C\uDFC6", text: latest.id + ": " + oppLine + " \u00b7 " + fmtKO(KO_KICKOFF[latest.id])};
     }
 
-    // Next upcoming kickoff (group stage)
-    const upcoming = GM.filter(m => KICKOFF[m.id] && KICKOFF[m.id] > nowTick).sort((a, b) => KICKOFF[a.id] - KICKOFF[b.id])[0];
-    if (upcoming) {
-      items.push({icon: "\u23F1", text: "Next: " + upcoming.t1 + " vs " + upcoming.t2 + " \u00b7 " + fmtKO(KICKOFF[upcoming.id])});
+    // Next upcoming KO kickoff with a confirmed time
+    const upcomingKO = ALL_KO.filter(m => KO_KICKOFF[m.id] && KO_KICKOFF[m.id] > nowTick).sort((a, b) => KO_KICKOFF[a.id] - KO_KICKOFF[b.id])[0];
+    let nextKOItem = null;
+    if (upcomingKO) {
+      const r32 = R32.find(m => m.id === upcomingKO.id);
+      let matchup = upcomingKO.id;
+      if (r32) {
+        const t1 = r32TeamName(r32.s1), t2 = r32TeamName(r32.s2);
+        if (t1 && t2) matchup = t1 + " vs " + t2;
+      }
+      nextKOItem = {icon: "\u23F1", text: "Next: " + matchup + " \u00b7 " + fmtKO(KO_KICKOFF[upcomingKO.id])};
+    }
+
+    if (latestKOItem || nextKOItem) {
+      if (latestKOItem) items.push(latestKOItem);
+      if (nextKOItem) items.push(nextKOItem);
+    } else {
+      // Fallback: no KO kickoffs known yet (shouldn't happen post-reset, but keep group
+      // stage as a safety net rather than showing nothing).
+      const playedGroup = GM.filter(m => results[m.id] && KICKOFF[m.id]);
+      if (playedGroup.length) {
+        const latest = playedGroup.slice().sort((a, b) => KICKOFF[b.id] - KICKOFF[a.id])[0];
+        items.push({icon: "\uD83C\uDFC1", text: latest.t1 + " " + results[latest.id].replace("-", " - ") + " " + latest.t2 + " \u00b7 Full Time"});
+      }
+      const upcoming = GM.filter(m => KICKOFF[m.id] && KICKOFF[m.id] > nowTick).sort((a, b) => KICKOFF[a.id] - KICKOFF[b.id])[0];
+      if (upcoming) {
+        items.push({icon: "\u23F1", text: "Next: " + upcoming.t1 + " vs " + upcoming.t2 + " \u00b7 " + fmtKO(KICKOFF[upcoming.id])});
+      }
     }
 
     // Leaderboard leaders, split by mode (only once at least one player has scored) —
@@ -1739,21 +1800,23 @@ function App() {
       setGsFreezeStatus("error"); setGsFreezeResult("Network error — try again");
     }
   };
-  const gsFreezeCommitFn = async () => {
+  const gsFreezeCommitFn = async (force) => {
     if (!adminToken) return;
     setGsFreezeStatus("committing");
     try {
       // Full Bracket players only, ranked by groupTotal (the frozen, group-stage-only
       // score) — Quick Picks players never had a group score, so they're excluded here,
       // same as the original "Group Stage Champions should be Full Bracket only" decision.
+      // Top 10 (not just the podium) so the snapshot is a genuine historical record, not
+      // just bragging rights for 3 people.
       const scored = calcAllScores(players, preds, results)
         .filter(p => effectiveMode(p.id, preds) === "full")
         .sort((a, b) => b.groupTotal - a.groupTotal)
-        .slice(0, 3)
+        .slice(0, 10)
         .map(p => ({ id: p.id, name: p.name, groupTotal: p.groupTotal, breakdown: p.breakdown }));
       const r = await fetch("/.netlify/functions/freeze-group-stage", {
         method: "POST",
-        body: JSON.stringify({ token: adminToken, mode: "commit", podium: scored }),
+        body: JSON.stringify({ token: adminToken, mode: "commit", podium: scored, force: !!force }),
       });
       const data = await r.json();
       if (r.status === 401) {
@@ -2526,7 +2589,7 @@ function App() {
       // stable, which it now does since they're defined once at module scope (see above App()).
       const bracketCtx = {slots, gKO, getPred, sfLoser, renderBMatch, renderFinalMatch, fmtKO};
       tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
-        e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Knockout Stages"),
+        e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "K.O. Stage \u2013 Your Predictions"),
         e("p", {className: "text-gray-500 text-sm mb-4"}, "Official FIFA format: 12 group winners + 12 runners-up + 8 best third-placed teams, now using the real qualified teams from the finished group stage. " +
           "Each match locks on its own once it kicks off \u2014 everything else stays open right up until then."),
         e("div", {className:"hidden md:block"}, e(BracketWrap, {key:"bwrap", ctx: bracketCtx})),
@@ -2541,6 +2604,8 @@ function App() {
     if (tab === "champions") {
       const gsMedals = ["\uD83E\uDD47", "\uD83E\uDD48", "\uD83E\uDD49"];
       const gsPodium = (groupStageFinal && groupStageFinal.podium) || [];
+      const gsTop3 = gsPodium.slice(0, 3);
+      const gsRest = gsPodium.slice(3);
       tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl max-w-2xl mx-auto"},
         e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "\uD83C\uDFC6 Group Stage Champions"),
         e("p", {className: "text-gray-500 text-sm mb-6"},
@@ -2550,32 +2615,58 @@ function App() {
         ),
         gsPodium.length === 0
           ? e("div", {className: "text-center text-gray-400 italic py-10"}, "Nothing here yet.")
-          : e("div", {className: "space-y-3"},
-              gsPodium.map((p, i) => e("div", {
-                key: p.id,
-                className: "flex items-center gap-4 rounded-2xl p-4",
-                style: {
-                  background: i === 0 ? "linear-gradient(145deg,#fffbeb,#fde68a)" : i === 1 ? "linear-gradient(145deg,#f8fafc,#e2e8f0)" : "linear-gradient(145deg,#fff7ed,#fed7aa)",
-                  border: i === 0 ? "2px solid #f59e0b" : "2px solid transparent"
-                }
-              },
-                e("span", {style: {fontSize: "2.2em", lineHeight: 1}}, gsMedals[i] || (i + 1)),
-                e("div", {style: {flex: 1, minWidth: 0}},
-                  e("div", {className: "font-bold text-blue-900 text-lg truncate"}, p.name),
-                  e("div", {className: "text-xs text-gray-500"},
-                    "Exact: " + ((p.breakdown && p.breakdown.groupExact) || 0) + " \u00b7 Result: " + ((p.breakdown && p.breakdown.groupOutcome) || 0))
-                ),
-                e("div", {className: "text-2xl font-black text-blue-900"}, p.groupTotal, e("span", {className: "text-sm font-bold text-gray-400 ml-1"}, "pts"))
-              ))
+          : e("div", null,
+              e("div", {className: "space-y-3"},
+                gsTop3.map((p, i) => e("div", {
+                  key: p.id,
+                  className: "flex items-center gap-4 rounded-2xl p-4",
+                  style: {
+                    background: i === 0 ? "linear-gradient(145deg,#fffbeb,#fde68a)" : i === 1 ? "linear-gradient(145deg,#f8fafc,#e2e8f0)" : "linear-gradient(145deg,#fff7ed,#fed7aa)",
+                    border: i === 0 ? "2px solid #f59e0b" : "2px solid transparent"
+                  }
+                },
+                  e("span", {style: {fontSize: "2.2em", lineHeight: 1}}, gsMedals[i]),
+                  e("div", {style: {flex: 1, minWidth: 0}},
+                    e("div", {className: "font-bold text-blue-900 text-lg truncate"}, p.name),
+                    e("div", {className: "text-xs text-gray-500"},
+                      "Exact: " + ((p.breakdown && p.breakdown.groupExact) || 0) + " \u00b7 Result: " + ((p.breakdown && p.breakdown.groupOutcome) || 0))
+                  ),
+                  e("div", {className: "text-2xl font-black text-blue-900"}, p.groupTotal, e("span", {className: "text-sm font-bold text-gray-400 ml-1"}, "pts"))
+                ))
+              ),
+              gsRest.length > 0 && e("div", {className: "mt-5"},
+                e("div", {className: "text-xs font-bold text-blue-400 uppercase tracking-wider mb-2 px-1"}, "Ranks 4\u201310"),
+                e("div", {className: "space-y-1.5"},
+                  gsRest.map((p, i) => e("div", {
+                    key: p.id,
+                    className: "flex items-center gap-3 rounded-xl px-4 py-2.5 bg-blue-50"
+                  },
+                    e("span", {className: "text-sm font-black text-blue-400 w-6 text-center"}, i + 4),
+                    e("div", {style: {flex: 1, minWidth: 0}},
+                      e("div", {className: "font-bold text-blue-900 text-sm truncate"}, p.name),
+                      e("div", {className: "text-[11px] text-gray-500"},
+                        "Exact: " + ((p.breakdown && p.breakdown.groupExact) || 0) + " \u00b7 Result: " + ((p.breakdown && p.breakdown.groupOutcome) || 0))
+                    ),
+                    e("div", {className: "text-lg font-black text-blue-900"}, p.groupTotal, e("span", {className: "text-xs font-bold text-gray-400 ml-1"}, "pts"))
+                  ))
+                )
+              )
             ),
 
-        // ---- Admin: freeze panel (only shows once, until frozen) ----
-        adminMode && !groupStageFinal && e("div", {className: "mt-8 border-2 border-amber-400 rounded-2xl p-5 bg-amber-50"},
+        // ---- Admin: freeze panel ----
+        // First-time freeze (no snapshot yet): same preview-then-commit flow as before, now
+        // capturing the top 10 instead of just the podium. If a snapshot already exists (e.g.
+        // the original top-3-only freeze from June 28), a separate re-freeze path lets admin
+        // deliberately replace it with a richer one — gated behind its own explicit confirm,
+        // and the old snapshot is kept as `previousSnapshot` server-side rather than discarded.
+        adminMode && e("div", {className: "mt-8 border-2 border-amber-400 rounded-2xl p-5 bg-amber-50"},
           e("h3", {className: "text-lg font-bold text-amber-900 mb-1 flex items-center gap-2"},
-            e("span", null, "\uD83D\uDD12"), "Freeze Group Stage Podium"
+            e("span", null, "\uD83D\uDD12"), groupStageFinal ? "Re-freeze Group Stage Podium" : "Freeze Group Stage Podium"
           ),
           e("p", {className: "text-xs text-amber-700 mb-4"},
-            "One-time action: saves the current top 3 Full Bracket players as the permanent Group Stage record. Once frozen, this can't be overwritten from the UI."
+            groupStageFinal
+              ? "A snapshot already exists, frozen " + new Date(groupStageFinal.frozenAt).toLocaleDateString(undefined, {day: "numeric", month: "short", year: "numeric"}) + " with " + ((groupStageFinal.podium || []).length) + " player" + ((groupStageFinal.podium || []).length === 1 ? "" : "s") + ". Re-freezing replaces it with the current top 10 Full Bracket players \u2014 the old snapshot is kept alongside the new one, not deleted."
+              : "One-time action: saves the current top 10 Full Bracket players as the permanent Group Stage record. Once frozen, this can't be overwritten from the UI without an explicit re-freeze."
           ),
           !gsFreezeConfirming && gsFreezeStatus !== "done" && e("div", {className: "flex gap-2 flex-wrap items-center"},
             e("button", {
@@ -2583,17 +2674,20 @@ function App() {
               disabled: gsFreezeStatus === "previewing",
               className: "px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-bold hover:bg-amber-700 disabled:opacity-50"
             }, gsFreezeStatus === "previewing" ? "Checking\u2026" : "Preview freeze"),
-            gsFreezePreview && !gsFreezePreview.alreadyFrozen && e("button", {
+            gsFreezePreview && e("button", {
               onClick: () => setGsFreezeConfirming(true),
               className: "px-4 py-2 bg-amber-700 text-white rounded-lg text-sm font-bold hover:bg-amber-800"
-            }, "Proceed to freeze \u2192")
+            }, gsFreezePreview.alreadyFrozen ? "Proceed to re-freeze \u2192" : "Proceed to freeze \u2192")
           ),
-          gsFreezePreview && gsFreezePreview.alreadyFrozen && e("p", {className: "mt-3 text-sm text-amber-800 font-semibold"}, "Already frozen \u2014 refresh the page to see it above."),
           gsFreezeConfirming && gsFreezeStatus !== "done" && e("div", {className: "mt-2 bg-white rounded-xl p-4 border-2 border-amber-300"},
-            e("p", {className: "text-sm font-bold text-amber-800 mb-3"}, "This permanently locks in the current top 3. Continue?"),
+            e("p", {className: "text-sm font-bold text-amber-800 mb-3"},
+              gsFreezePreview && gsFreezePreview.alreadyFrozen
+                ? "This replaces the existing snapshot with the current top 10. The old snapshot is kept (not deleted). Continue?"
+                : "This permanently locks in the current top 10. Continue?"
+            ),
             e("div", {className: "flex gap-2"},
               e("button", {
-                onClick: gsFreezeCommitFn,
+                onClick: () => gsFreezeCommitFn(!!(gsFreezePreview && gsFreezePreview.alreadyFrozen)),
                 disabled: gsFreezeStatus === "committing",
                 className: "px-4 py-2 bg-amber-700 text-white rounded-lg text-sm font-bold hover:bg-amber-800 disabled:opacity-50"
               }, gsFreezeStatus === "committing" ? "Freezing\u2026" : "Yes, freeze it now"),
@@ -2855,7 +2949,7 @@ function App() {
         // ── Admin + header ───────────────────────────────────────────
         e("div", {className: "flex items-start justify-between gap-4 mb-5 flex-wrap"},
           e("div", null,
-            e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "Actual Results"),
+            e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "K.O. Stage \u2013 Actual Results"),
             e("p", {className: "text-gray-500 text-sm"}, "Scores sync from openfootball (~daily) · admin can also enter manually")
           ),
           e("div", {className: "flex flex-col items-end gap-2"},
@@ -3000,8 +3094,8 @@ function App() {
           e("div", {className: "h-full rounded " + (done === total ? "bg-emerald-400" : "bg-amber-400"), style: {width: (total ? Math.round(done / total * 100) : 0) + "%"}}))
       );
       const chips = myMode === "quick"
-        ? [chip("Quick Picks", quickDone, 6, "quick"), chip("My Group Picks", groupDone, 72, "group"), chip("Knockout Stages", bracketDone, 32, "bracket")]
-        : [chip("My Group Picks", groupDone, 72, "group"), chip("Knockout Stages", bracketDone, 32, "bracket"), chip("Quick Picks", quickDone, 6, "quick")];
+        ? [chip("Quick Picks", quickDone, 6, "quick"), chip("My Group Picks", groupDone, 72, "group"), chip("K.O. Picks", bracketDone, 32, "bracket")]
+        : [chip("My Group Picks", groupDone, 72, "group"), chip("K.O. Picks", bracketDone, 32, "bracket"), chip("Quick Picks", quickDone, 6, "quick")];
       progressStrip = e("div", {className: "mb-4"},
         e("div", {className: "flex gap-2 flex-wrap"}, chips),
         e("p", {className: "text-center text-emerald-200/90 text-[11px] font-semibold mt-2"},
@@ -3033,10 +3127,10 @@ function App() {
 
     mainView = e("div", null,
       e("div", {className: "flex gap-2 mb-4 justify-center flex-wrap relative"},
-        Tab("Knockout Stages", "bracket"),
-        Tab("Group Stage Champions", "champions"),
+        Tab("K.O. Stage \u2013 Your Predictions", "bracket"),
+        Tab("K.O. Stage \u2013 Actual Results", "results"),
         e("button", {key: "live", onClick: () => setLive(true), className: "px-4 py-2 rounded-lg font-semibold text-sm bg-purple-500/80 text-white hover:bg-purple-600"}, "\uD83C\uDFC6 Leaderboard"),
-        Tab("Actual Results", "results"),
+        Tab("Group Stage Champions", "champions"),
         // ---- "More" dropdown: Quick Picks / My Group Picks / My Group Overview ----
         // These were the primary tabs before the knockout reset; now that the group stage
         // is locked in for good, they're still fully usable (nothing here is disabled),

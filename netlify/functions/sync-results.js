@@ -22,6 +22,20 @@
 // Required Netlify environment variables (same ones set-result.js uses):
 //   FIREBASE_SERVICE_ACCOUNT  - the full JSON key for a Firebase service account
 //   FIREBASE_DB_URL           - https://world-cup-2026-predictio-23e8f-default-rtdb.firebaseio.com
+//
+// ---- BUGFIX (this version) ----
+// The previous version matched knockout winners to match IDs by "find the
+// first match in this round that doesn't have a result yet" — completely
+// independent of which two teams the winner actually played. Since this
+// function runs every 30 minutes, a single real result (e.g. Canada's R32
+// win) got reassigned to a NEW "first unfilled" match ID on every single
+// run, eventually stamping the same winner across M73, M74, M75, M76, M77,
+// M78, M79 in sequence — none of which Canada played in (except M73). This
+// version instead resolves each round's REAL team-name pairs first (R32 via
+// the same getRealSlots()-equivalent logic index.html uses; R16+ via the
+// previous round's now-known results), then matches the feed's winner to a
+// match ID only when the winner's name is actually one of that match's two
+// real teams. No identity match -> no write, full stop.
 
 const admin = require("firebase-admin");
 
@@ -38,9 +52,27 @@ if (!admin.apps.length) {
   }
 }
 
-// ---- Match data, copied verbatim from index.html (GM / R32 / R16 / QF / SF) ----
-// IMPORTANT: if the group fixtures or bracket structure in index.html ever
-// change, this copy needs the same edit, or the two will drift out of sync.
+// ---- Match data, copied verbatim from index.html (GT / GM / R32 / R16 / QF / SF /
+// THIRD_SLOTS / TSLOT_PARTNER_GROUP / THIRD_COMBINATIONS) ----
+// IMPORTANT: if any of this ever changes in index.html, this copy needs the same
+// edit, or the two will drift out of sync. (Same caveat as before — unchanged by
+// this bugfix — but at least now a drift produces a wrong-or-missing result
+// instead of a wrong result silently cascading across multiple matches.)
+const GT = {
+  A:["Mexico","South Africa","South Korea","Czechia"],
+  B:["Canada","Bosnia-Herzegovina","Qatar","Switzerland"],
+  C:["Brazil","Morocco","Haiti","Scotland"],
+  D:["United States","Paraguay","Australia","Turkiye"],
+  E:["Germany","Curacao","Ivory Coast","Ecuador"],
+  F:["Netherlands","Japan","Sweden","Tunisia"],
+  G:["Belgium","Egypt","Iran","New Zealand"],
+  H:["Spain","Cape Verde","Saudi Arabia","Uruguay"],
+  I:["France","Senegal","Iraq","Norway"],
+  J:["Argentina","Algeria","Austria","Jordan"],
+  K:["Colombia","Uzbekistan","Portugal","Congo DR"],
+  L:["England","Croatia","Ghana","Panama"]
+};
+
 const GM = [
   {id:"A1",t1:"Mexico",t2:"South Africa",g:"A"},{id:"A2",t1:"South Korea",t2:"Czechia",g:"A"},
   {id:"A3",t1:"Mexico",t2:"Czechia",g:"A"},{id:"A4",t1:"South Korea",t2:"South Africa",g:"A"},
@@ -81,28 +113,160 @@ const GM = [
 ];
 
 const R32 = [
-  {id:"M73",s1:"2A",s2:"2B",d:"Jun 28"},{id:"M74",s1:"1E",s2:"T1",d:"Jun 28"},
-  {id:"M75",s1:"1F",s2:"2C",d:"Jun 29"},{id:"M76",s1:"1C",s2:"2F",d:"Jun 29"},
-  {id:"M77",s1:"1I",s2:"T2",d:"Jun 29"},{id:"M78",s1:"2E",s2:"2I",d:"Jun 30"},
-  {id:"M79",s1:"1A",s2:"T3",d:"Jun 30"},{id:"M80",s1:"1L",s2:"T4",d:"Jun 30"},
-  {id:"M81",s1:"1D",s2:"T5",d:"Jul 1"}, {id:"M82",s1:"1G",s2:"T6",d:"Jul 1"},
-  {id:"M83",s1:"2K",s2:"2L",d:"Jul 1"}, {id:"M84",s1:"1H",s2:"2J",d:"Jul 2"},
-  {id:"M85",s1:"1B",s2:"T7",d:"Jul 2"}, {id:"M86",s1:"1J",s2:"2H",d:"Jul 2"},
-  {id:"M87",s1:"1K",s2:"T8",d:"Jul 3"}, {id:"M88",s1:"2D",s2:"2G",d:"Jul 3"}
+  {id:"M73",s1:"2A",s2:"2B"},{id:"M74",s1:"1E",s2:"T1"},
+  {id:"M75",s1:"1F",s2:"2C"},{id:"M76",s1:"1C",s2:"2F"},
+  {id:"M77",s1:"1I",s2:"T2"},{id:"M78",s1:"2E",s2:"2I"},
+  {id:"M79",s1:"1A",s2:"T3"},{id:"M80",s1:"1L",s2:"T4"},
+  {id:"M81",s1:"1D",s2:"T5"},{id:"M82",s1:"1G",s2:"T6"},
+  {id:"M83",s1:"2K",s2:"2L"},{id:"M84",s1:"1H",s2:"2J"},
+  {id:"M85",s1:"1B",s2:"T7"},{id:"M86",s1:"1J",s2:"2H"},
+  {id:"M87",s1:"1K",s2:"T8"},{id:"M88",s1:"2D",s2:"2G"}
 ];
 const R16 = [
-  {id:"M89",f1:"M74",f2:"M77",d:"Jul 4"},{id:"M90",f1:"M73",f2:"M75",d:"Jul 4"},
-  {id:"M91",f1:"M76",f2:"M78",d:"Jul 5"},{id:"M92",f1:"M79",f2:"M80",d:"Jul 5"},
-  {id:"M93",f1:"M83",f2:"M84",d:"Jul 6"},{id:"M94",f1:"M81",f2:"M82",d:"Jul 6"},
-  {id:"M95",f1:"M86",f2:"M88",d:"Jul 7"},{id:"M96",f1:"M85",f2:"M87",d:"Jul 7"}
+  {id:"M89",f1:"M74",f2:"M77"},{id:"M90",f1:"M73",f2:"M75"},
+  {id:"M91",f1:"M76",f2:"M78"},{id:"M92",f1:"M79",f2:"M80"},
+  {id:"M93",f1:"M83",f2:"M84"},{id:"M94",f1:"M81",f2:"M82"},
+  {id:"M95",f1:"M86",f2:"M88"},{id:"M96",f1:"M85",f2:"M87"}
 ];
 const QF = [
-  {id:"M97",f1:"M89",f2:"M90",d:"Jul 9"}, {id:"M98",f1:"M93",f2:"M94",d:"Jul 10"},
-  {id:"M99",f1:"M91",f2:"M92",d:"Jul 10"},{id:"M100",f1:"M95",f2:"M96",d:"Jul 11"}
+  {id:"M97",f1:"M89",f2:"M90"},{id:"M98",f1:"M93",f2:"M94"},
+  {id:"M99",f1:"M91",f2:"M92"},{id:"M100",f1:"M95",f2:"M96"}
 ];
 const SF = [
-  {id:"M101",f1:"M97",f2:"M98",d:"Jul 14"},{id:"M102",f1:"M99",f2:"M100",d:"Jul 15"}
+  {id:"M101",f1:"M97",f2:"M98"},{id:"M102",f1:"M99",f2:"M100"}
 ];
+
+const THIRD_SLOTS = [
+  {slot:"T1", allowed:"ABCDF"}, {slot:"T2", allowed:"CDFGH"},
+  {slot:"T3", allowed:"CEFHI"}, {slot:"T4", allowed:"EHIJK"},
+  {slot:"T5", allowed:"BEFIJ"}, {slot:"T6", allowed:"AEHIJ"},
+  {slot:"T7", allowed:"EFGIJ"}, {slot:"T8", allowed:"DEIJL"}
+];
+const TSLOT_PARTNER_GROUP = {T1:"E", T2:"I", T3:"A", T4:"L", T5:"D", T6:"G", T7:"B", T8:"K"};
+const THIRD_COMBINATIONS = {
+  "BDEFIJKL": {A:"E", B:"J", D:"B", E:"D", G:"I", I:"F", K:"L", L:"K"}
+};
+
+function assignThirds(thirds) {
+  const qualifyingGroups = thirds.map(t => t.group).slice().sort().join("");
+  const combo = THIRD_COMBINATIONS[qualifyingGroups];
+  if (combo) {
+    const result = {};
+    Object.keys(TSLOT_PARTNER_GROUP).forEach(tslot => {
+      const oneGroup = TSLOT_PARTNER_GROUP[tslot];
+      const thirdGroup = combo[oneGroup];
+      const match = thirds.find(t => t.group === thirdGroup);
+      result[tslot] = match ? match.team : null;
+    });
+    return result;
+  }
+  const result = {};
+  const used = new Array(thirds.length).fill(false);
+  function bt(slotIdx) {
+    if (slotIdx === THIRD_SLOTS.length) return true;
+    const slot = THIRD_SLOTS[slotIdx];
+    for (let i = 0; i < thirds.length; i++) {
+      if (used[i]) continue;
+      if (slot.allowed.indexOf(thirds[i].group) === -1) continue;
+      used[i] = true;
+      result[slot.slot] = thirds[i].team;
+      if (bt(slotIdx + 1)) return true;
+      used[i] = false;
+      delete result[slot.slot];
+    }
+    return false;
+  }
+  if (!bt(0)) {
+    THIRD_SLOTS.forEach((s, i) => { result[s.slot] = thirds[i] ? thirds[i].team : null; });
+  }
+  return result;
+}
+
+function calcRealStandings(results) {
+  const st = {};
+  Object.keys(GT).forEach(g => {
+    st[g] = GT[g].map(t => ({team:t, pts:0, played:0, w:0, d:0, l:0, gf:0, ga:0}));
+  });
+  GM.forEach(m => {
+    const sc = results[m.id];
+    if (!sc || !sc.includes("-")) return;
+    const parts = sc.split("-");
+    const gf = parseInt(parts[0]), ga = parseInt(parts[1]);
+    if (isNaN(gf) || isNaN(ga)) return;
+    const t1 = st[m.g].find(t => t.team === m.t1);
+    const t2 = st[m.g].find(t => t.team === m.t2);
+    if (!t1 || !t2) return;
+    t1.gf += gf; t1.ga += ga; t1.played++;
+    t2.gf += ga; t2.ga += gf; t2.played++;
+    if (gf > ga) { t1.pts += 3; t1.w++; t2.l++; }
+    else if (gf < ga) { t2.pts += 3; t2.w++; t1.l++; }
+    else { t1.pts++; t2.pts++; t1.d++; t2.d++; }
+  });
+  const q = {};
+  const thirds = [];
+  Object.keys(st).forEach(g => {
+    st[g].sort((a, b) => {
+      if (b.pts !== a.pts) return b.pts - a.pts;
+      const gdb = b.gf - b.ga, gda = a.gf - a.ga;
+      if (gdb !== gda) return gdb - gda;
+      return b.gf - a.gf;
+    });
+    q[g] = {first: st[g][0] ? st[g][0].team : null, second: st[g][1] ? st[g][1].team : null};
+    if (st[g][2] && st[g][2].played > 0) thirds.push({team: st[g][2].team, group: g, pts: st[g][2].pts, gf: st[g][2].gf, ga: st[g][2].ga});
+  });
+  thirds.sort((a, b) => {
+    if (b.pts !== a.pts) return b.pts - a.pts;
+    const gdb = b.gf - b.ga, gda = a.gf - a.ga;
+    if (gdb !== gda) return gdb - gda;
+    return b.gf - a.gf;
+  });
+  const bestThirds = thirds.slice(0, 8);
+  return {qualified: q, bestThirds: bestThirds};
+}
+
+function getRealSlots(results) {
+  const {qualified, bestThirds} = calcRealStandings(results);
+  const slots = {};
+  Object.keys(qualified).forEach(g => {
+    slots["1" + g] = qualified[g].first;
+    slots["2" + g] = qualified[g].second;
+  });
+  if (bestThirds.length === 8) {
+    const assigned = assignThirds(bestThirds);
+    Object.keys(assigned).forEach(k => { slots[k] = assigned[k]; });
+  } else {
+    for (let i = 1; i <= 8; i++) slots["T" + i] = null;
+  }
+  return slots;
+}
+
+// Resolves a knockout match id (R32/R16/QF/SF/M103/M104) to its two real team names,
+// given current `results` (which may include knockout winners from earlier rounds
+// already written in this same run via `liveResults`). Returns {t1, t2} with nulls
+// for any side not yet determined.
+function resolveKOTeams(mid, slots, liveResults) {
+  const r32 = R32.find(m => m.id === mid);
+  if (r32) return {t1: slots[r32.s1] || null, t2: slots[r32.s2] || null};
+  const m = R16.find(x => x.id === mid) || QF.find(x => x.id === mid) || SF.find(x => x.id === mid);
+  if (m) return {t1: liveResults[m.f1] || null, t2: liveResults[m.f2] || null};
+  if (mid === "M104") return {t1: liveResults["M101"] || null, t2: liveResults["M102"] || null};
+  if (mid === "M103") {
+    // Bronze final: the two SF LOSERS, not winners. Need both SF matches' team pairs
+    // and their winners to figure out who lost.
+    const sf1 = SF.find(x => x.id === "M101"), sf2 = SF.find(x => x.id === "M102");
+    const sf1Teams = resolveKOTeams("M101", slots, liveResults);
+    const sf2Teams = resolveKOTeams("M102", slots, liveResults);
+    const sf1Winner = liveResults["M101"], sf2Winner = liveResults["M102"];
+    const loserOf = (teams, winner) => {
+      if (!winner || !teams.t1 || !teams.t2) return null;
+      if (winner === teams.t1) return teams.t2;
+      if (winner === teams.t2) return teams.t1;
+      return null;
+    };
+    return {t1: loserOf(sf1Teams, sf1Winner), t2: loserOf(sf2Teams, sf2Winner)};
+  }
+  return {t1: null, t2: null};
+}
 
 // ---- Team name normalisation (openfootball naming differs slightly from ours) ----
 const TN = {
@@ -117,6 +281,18 @@ const TN = {
 };
 const norm = (t) => TN[t] || t;
 
+const ROUND_BUCKETS = {
+  "round of 32": R32,
+  "round of 16": R16,
+  "quarter-final": QF,
+  "quarter-finals": QF,
+  "semi-final": SF,
+  "semi-finals": SF,
+  "third place": [{id: "M103"}],
+  "third-place": [{id: "M103"}],
+  "final": [{id: "M104"}],
+};
+
 async function fetchAndApplySync() {
   const res = await fetch(
     "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json"
@@ -127,9 +303,14 @@ async function fetchAndApplySync() {
   const data = await res.json();
   const matches = data.matches || [];
 
-  // Read current results so we only write what's changed (same as before).
   const snapshot = await admin.database().ref("results").once("value");
   const results = snapshot.val() || {};
+
+  // liveResults starts as a copy of the DB's current results and accumulates any
+  // new writes from THIS run, so later rounds (which depend on earlier winners) can
+  // resolve correctly even if multiple rounds advance within a single sync run.
+  const liveResults = Object.assign({}, results);
+  const slots = getRealSlots(results); // group-stage standings don't change once frozen
 
   const gmLookup = {};
   GM.forEach((m) => {
@@ -158,38 +339,44 @@ async function fetchAndApplySync() {
           updates[id] = ft[0] + "-" + ft[1];
         }
       }
-    } else {
-      const round = (m.round || "").toLowerCase();
-      let winner = null;
-      if (sc.p) {
-        winner = sc.p[0] > sc.p[1] ? t1 : t2;
-      } else if (ft[0] !== ft[1]) {
-        winner = ft[0] > ft[1] ? t1 : t2;
-      }
-      if (winner && !t1.match(/^[0-9W]/) && !t2.match(/^[0-9W]/)) {
-        const roundMap = {
-          "round of 32": R32,
-          "round of 16": R16,
-          "quarter-final": QF,
-          "quarter-finals": QF,
-          "semi-final": SF,
-          "semi-finals": SF,
-          "third place": [{ id: "M103" }],
-          "third-place": [{ id: "M103" }],
-          final: [{ id: "M104" }],
-        };
-        let bucket = null;
-        for (const [k, v] of Object.entries(roundMap)) {
-          if (round.includes(k)) {
-            bucket = v;
-            break;
-          }
-        }
-        if (bucket) {
-          const unfilled = bucket.find((bm) => !updates[bm.id] && !results[bm.id]);
-          if (unfilled) updates[unfilled.id] = winner;
-        }
-      }
+      return;
+    }
+
+    // Knockout match. Only proceed once both sides are REAL team names (not
+    // placeholder codes like "W73" or "1A" — those mean the feed itself doesn't
+    // know who's playing yet).
+    if (t1.match(/^[0-9W]/) || t2.match(/^[0-9W]/)) return;
+
+    let winner = null;
+    if (sc.p) {
+      winner = sc.p[0] > sc.p[1] ? t1 : t2;
+    } else if (ft[0] !== ft[1]) {
+      winner = ft[0] > ft[1] ? t1 : t2;
+    }
+    if (!winner) return; // draw with no penalty shootout recorded — nothing to write yet
+
+    const round = (m.round || "").toLowerCase();
+    let bucket = null;
+    for (const [k, v] of Object.entries(ROUND_BUCKETS)) {
+      if (round.includes(k)) { bucket = v; break; }
+    }
+    if (!bucket) return;
+
+    // THE FIX: match by team identity, not "first empty slot in the round".
+    // For each candidate match id in this round, resolve its real two teams and
+    // only assign the winner if it's genuinely one of those two teams AND the
+    // other side matches the feed's other team too (defends against e.g. two
+    // different R32 matches both featuring a team named identically in error).
+    for (const bm of bucket) {
+      if (updates[bm.id] || liveResults[bm.id]) continue; // already has/getting a result
+      const teams = resolveKOTeams(bm.id, slots, liveResults);
+      if (!teams.t1 || !teams.t2) continue; // not yet resolved on our side — can't match
+      const teamsMatch =
+        (teams.t1 === t1 && teams.t2 === t2) || (teams.t1 === t2 && teams.t2 === t1);
+      if (!teamsMatch) continue;
+      updates[bm.id] = winner;
+      liveResults[bm.id] = winner; // so later rounds in this same run can resolve off it
+      break;
     }
   });
 
@@ -221,6 +408,12 @@ exports.handler = async function () {
     return { statusCode: 500, body: JSON.stringify({ error: String(err) }) };
   }
 };
+
+// Exposed for automated testing only — not used by the Netlify handler itself.
+exports.__test_fetchAndApplySync = fetchAndApplySync;
+exports.__test_getRealSlots = getRealSlots;
+exports.__test_resolveKOTeams = resolveKOTeams;
+exports.__test_GM = GM;
 
 // The actual cron schedule for this function is declared in netlify.toml
 // (not here) — see the [functions."sync-results"] section in that file.

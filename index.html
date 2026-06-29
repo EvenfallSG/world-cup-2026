@@ -2694,7 +2694,7 @@ function App() {
       });
       const anyActualResults = GM.some(m => results[m.id]);
 
-      const groupResultsSection = e("div", null,
+      const groupResultsSection = e("div", {className: "mt-6"},
         e("div", {className: "flex items-center justify-between mb-4 flex-wrap gap-2"},
           e("h3", {className: "text-lg font-bold text-blue-900 flex items-center gap-2"},
             e("span", null, "\u26BD"), "Group Stage Results"
@@ -2903,9 +2903,9 @@ function App() {
 
         livePreview,
         e("div", {className: "mt-6 space-y-0"},
-          groupResultsSection,
           koResultsSection,
-          awardsSection
+          awardsSection,
+          groupResultsSection
         ),
 
         // ---- Knockout reset panel (admin only, June 28) ----

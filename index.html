@@ -1142,9 +1142,41 @@ function BracketWrap({ctx}) {
 // CentreCol are: redefining a component on every render gives it a new identity, so React
 // fully remounts and re-scrolls it on every ~8s poll instead of preserving scroll position.
 function MobileBracket({ctx, nowTick}) {
-  const {slots, gKO, feederTeam, getPred, sfLoser, renderBMatch, renderFinalMatch, fmtKO} = ctx;
+  const {slots, gKO, feederTeam, getPred, sfLoser, renderBMatch, renderFinalMatch, fmtKO, results} = ctx;
   const r32m = (id) => { const m = R32.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:slots[m.s1], t2:slots[m.s2], date:m.d, label:m.id}); };
   const kom  = (arr,id) => { const m = arr.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:feederTeam(m.f1), t2:feederTeam(m.f2), date:m.d, label:m.id, waitingOn:m.f1+" & "+m.f2}); };
+
+  // Which section should the view land on? The "current" round is the earliest one
+  // that still has matches without a result — i.e. the round actively being played or
+  // picked. Once every match in a round has a result, we advance to the next. This is
+  // recomputed from live results, so the landing point tracks the tournament forward
+  // automatically (R16 now, QF once R16 finishes, and so on).
+  const res = results || {};
+  const roundComplete = (arr) => arr.every(m => res[m.id]);
+  const currentSectionId = (() => {
+    if (!roundComplete(R32)) return "sec-r32";
+    if (!roundComplete(R16)) return "sec-r16";
+    if (!roundComplete(QF))  return "sec-qf";
+    if (!roundComplete(SF))  return "sec-sf";
+    return "sec-final";
+  })();
+  // On first mount (and whenever the current round advances), jump the list to that
+  // section so mobile users start on the live round rather than scrolling past finished
+  // ones. We only auto-scroll when the current round changes, never on every poll, so it
+  // won't fight a user who has scrolled elsewhere.
+  const lastScrolledRound = React.useRef(null);
+  React.useEffect(() => {
+    if (lastScrolledRound.current === currentSectionId) return;
+    lastScrolledRound.current = currentSectionId;
+    // R32 is the top of the list — no scroll needed, and scrolling to it would yank the
+    // page up unnecessarily on first paint.
+    if (currentSectionId === "sec-r32") return;
+    const el = document.getElementById(currentSectionId);
+    if (el) {
+      // Defer to after paint so the section exists and layout is settled.
+      requestAnimationFrame(() => el.scrollIntoView({behavior: "smooth", block: "start"}));
+    }
+  }, [currentSectionId]);
 
   const sectionHeader = (label) => eGlobal("div", {
     className: "text-center text-[11px] font-extrabold tracking-wider text-white bg-blue-700 rounded-lg py-1.5 mb-2 mt-4 uppercase"
@@ -2645,7 +2677,7 @@ function App() {
       // module-scope bracket components need. Rebuilding this object every render is fine and
       // normal — only BracketWrap/CentreCol/MobileBracket's own function identity needs to stay
       // stable, which it now does since they're defined once at module scope (see above App()).
-      const bracketCtx = {slots, gKO, feederTeam, getPred, sfLoser, renderBMatch, renderFinalMatch, fmtKO};
+      const bracketCtx = {slots, gKO, feederTeam, getPred, sfLoser, renderBMatch, renderFinalMatch, fmtKO, results};
       tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
         e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "K.O. Stage \u2013 Your Predictions"),
         e("p", {className: "text-gray-500 text-sm mb-4"}, "Official FIFA format: 12 group winners + 12 runners-up + 8 best third-placed teams, now using the real qualified teams from the finished group stage. " +

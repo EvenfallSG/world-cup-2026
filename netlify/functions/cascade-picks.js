@@ -84,7 +84,7 @@ exports.handler = async (event) => {
 
   // Auth check
   let tokenOk = false;
-  try { tokenOk = verifyToken(token); } catch {}
+  try { tokenOk = verifyToken(token, process.env.ADMIN_TOKEN_SECRET); } catch {}
   if (!tokenOk) {
     return { statusCode: 401, body: JSON.stringify({ error: "Unauthorized" }) };
   }

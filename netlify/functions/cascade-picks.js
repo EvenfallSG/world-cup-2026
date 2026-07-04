@@ -133,58 +133,38 @@ exports.handler = async (event) => {
     players.forEach(player => {
       const pid = player.id;
       targetMatches.forEach(target => {
-        // What did the actual results say for the two feeder matches?
-        const actualWinnerF1 = koWinner(results[target.f1]);
-        const actualWinnerF2 = koWinner(results[target.f2]);
+        // The two teams now IN this target match are the actual winners of its
+        // two feeder matches. A KO result is stored as "Winner|score[|pens]".
+        const advancingTeamF1 = koWinner(results[target.f1]);
+        const advancingTeamF2 = koWinner(results[target.f2]);
 
-        if (!actualWinnerF1 || !actualWinnerF2) {
-          // Source result not in yet — skip this target match for this player
+        if (!advancingTeamF1 || !advancingTeamF2) {
+          // Feeder result not in yet — leave this target match's picks untouched.
           skippedCount++;
           return;
         }
 
-        // What did this player pick for the two feeder matches?
-        const playerPickF1 = preds[pid + "-" + target.f1] || null;
-        const playerPickF2 = preds[pid + "-" + target.f2] || null;
+        // The player's EXISTING pick for this target match (their prediction of
+        // who wins it). We only validate it — we never overwrite it with a
+        // feeder winner. The R16 pick is the player's own call between the two
+        // teams that actually advanced; it is not derived from the R32 pick.
+        const existingPick = preds[pid + "-" + target.id] || null;
 
-        // Determine which team (if any) this player correctly called through
-        // into this target match slot
-        let carryTeam = null;
-        if (playerPickF1 === actualWinnerF1) carryTeam = actualWinnerF1;
-        else if (playerPickF2 === actualWinnerF2) carryTeam = actualWinnerF2;
-        // If player correctly picked BOTH feeders (both teams are now in this match),
-        // their existing target pick (if any) is kept if it matches one of the two — otherwise
-        // we carry the f1 winner as a default (they can re-pick freely anyway).
-        // Actually: if both picks were correct, their existing target pick may already be valid.
-        // Check existing target pick first.
-        const existingTargetPick = preds[pid + "-" + target.id] || null;
-        const bothCorrect = playerPickF1 === actualWinnerF1 && playerPickF2 === actualWinnerF2;
-        if (bothCorrect) {
-          if (existingTargetPick === actualWinnerF1 || existingTargetPick === actualWinnerF2) {
-            // Their existing pick is valid — leave it untouched
-            skippedCount++; // not a "carry" or "clear", just leave it
-            return;
-          }
-          // They picked both correctly but their downstream pick is stale/missing — carry f1 winner as default
-          carryTeam = actualWinnerF1;
+        if (!existingPick) {
+          // No pick to validate — nothing to carry or clear. Player fills it in.
+          skippedCount++;
+          return;
         }
 
-        if (carryTeam) {
-          // Only write if different from what's already there
-          if (preds[pid + "-" + target.id] !== carryTeam) {
-            writes[pid + "-" + target.id] = carryTeam;
-            carriedCount++;
-          } else {
-            skippedCount++; // already correct, no write needed
-          }
+        if (existingPick === advancingTeamF1 || existingPick === advancingTeamF2) {
+          // Their predicted winner is one of the two teams that actually
+          // advanced — the pick is still valid, keep it exactly as-is.
+          carriedCount++;
         } else {
-          // Player's pick was wrong (their team was eliminated) — clear target pick
-          if (preds[pid + "-" + target.id]) {
-            writes[pid + "-" + target.id] = null; // null = delete
-            clearedCount++;
-          } else {
-            skippedCount++; // already empty, no write needed
-          }
+          // Their predicted winner got knocked out before reaching this match —
+          // clear the pick so they re-pick from the two teams now in the slot.
+          writes[pid + "-" + target.id] = null; // null = delete
+          clearedCount++;
         }
       });
     });

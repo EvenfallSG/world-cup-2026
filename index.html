@@ -1307,7 +1307,7 @@ function App() {
 
   // ---- "What's new" notice on the login screen ----
   // Bump this string whenever the notice content changes, so returning players see it again once.
-  const WHATS_NEW_VERSION = "2026-07-04-r16-cascade";
+  const WHATS_NEW_VERSION = "2026-07-04-r16-realteams";
   const [whatsNewDismissed, setWhatsNewDismissedState] = useState(() => {
     try { return localStorage.getItem("wc26_whatsnew_dismissed") === WHATS_NEW_VERSION; }
     catch { return false; }
@@ -2317,13 +2317,12 @@ function App() {
             e("span", {className: "wc-d-reset-tag"}, "\uD83C\uDFC6 Round of 16 is live"),
             e("button", {onClick: () => setWhatsNewDismissed(true), className: "wc-d-dim hover:text-white text-sm font-bold leading-none", style: {background: "none", border: "none", cursor: "pointer", marginTop: "2px"}}, "\u2715")
           ),
-          e("h3", null, "R32 done \u2014 your picks have been carried forward"),
+          e("h3", null, "Round of 16 picks are reset to the correct teams"),
           e("ul", null,
-            e("li", null, e("b", null, "Correct picks carried forward:"), " if your R32 pick was right, we've automatically filled in your R16 slot with that team. Check your bracket!"),
-            e("li", null, e("b", null, "Wrong picks cleared:"), " if your team was knocked out, that slot is empty \u2014 go pick the team that beat them."),
-            e("li", null, e("b", null, "All picks editable until kickoff:"), " you can change any R16 pick right up until that match starts. Nothing locks early."),
-            e("li", null, e("b", null, "This repeats each round:"), " after R16, QF picks get cascaded. After QF, SF picks. The bracket freezes for good when the Final 4 is set."),
-            e("li", null, e("b", null, "Points already banked:"), " your R32 knockout points are locked in \u2014 the leaderboard keeps a running total from here to the Final.")
+            e("li", null, e("b", null, "Real teams, in place now:"), " your R16 bracket now shows the actual teams that advanced from the Round of 32 \u2014 not anyone's earlier predictions."),
+            e("li", null, e("b", null, "Re-choose if you were knocked out:"), " if the team you'd picked got eliminated, that slot is open \u2014 pick from the two teams that actually made it."),
+            e("li", null, e("b", null, "Your points are safe:"), " knockout scoring continues uninterrupted. Nothing has been reset \u2014 every point you've earned is still yours."),
+            e("li", null, e("b", null, "Same reset each round:"), " we'll refresh the bracket to the correct teams again at the Quarter Finals, Semi Finals and Final.")
           ),
           e("p", {style: {margin: "12px 0 0", fontSize: "14.5px", fontWeight: 700, color: "#f6c453", textAlign: "center"}}, "Good luck in the Round of 16! \u26BD")
         ),

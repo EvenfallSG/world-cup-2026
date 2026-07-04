@@ -1059,8 +1059,8 @@ function BracketLines({wrapRef, centreRef}) {
 // the values inside ctx are rebuilt fresh every render (totally normal), only the CentreCol
 // function reference itself needs to stay constant.
 function CentreCol({centreRef, ctx}) {
-  const {gKO, getPred, sfLoser, renderFinalMatch, renderBMatch} = ctx;
-  const finalT1 = gKO("M101"), finalT2 = gKO("M102");
+  const {gKO, feederTeam, getPred, sfLoser, renderFinalMatch, renderBMatch} = ctx;
+  const finalT1 = feederTeam("M101"), finalT2 = feederTeam("M102");
   const champ   = gKO("M104");
   const runner  = (champ&&finalT1&&finalT2) ? (champ===finalT1?finalT2:finalT1) : null;
   const third   = gKO("M103");
@@ -1107,11 +1107,11 @@ function CentreCol({centreRef, ctx}) {
 // of being torn down and rebuilt — the same root cause as the mobile remount bug, just less
 // visible on desktop since there's no per-round tab state to visibly snap back.
 function BracketWrap({ctx}) {
-  const {slots, gKO, renderBMatch} = ctx;
+  const {slots, gKO, feederTeam, renderBMatch} = ctx;
   const wrapRef   = React.useRef(null);
   const centreRef = React.useRef(null);
   const r32m = (id) => { const m = R32.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:slots[m.s1], t2:slots[m.s2], date:m.d, label:m.id}); };
-  const kom  = (arr,id) => { const m = arr.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:gKO(m.f1), t2:gKO(m.f2), date:m.d, label:m.id, waitingOn:m.f1+" & "+m.f2}); };
+  const kom  = (arr,id) => { const m = arr.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:feederTeam(m.f1), t2:feederTeam(m.f2), date:m.d, label:m.id, waitingOn:m.f1+" & "+m.f2}); };
   const col  = (title, items) => eGlobal("div", {className:"bcol"},
     eGlobal("div", {className:"bcolh"}, title),
     eGlobal("div", {className:"bmatches"}, items)
@@ -1142,9 +1142,9 @@ function BracketWrap({ctx}) {
 // CentreCol are: redefining a component on every render gives it a new identity, so React
 // fully remounts and re-scrolls it on every ~8s poll instead of preserving scroll position.
 function MobileBracket({ctx, nowTick}) {
-  const {slots, gKO, getPred, sfLoser, renderBMatch, renderFinalMatch, fmtKO} = ctx;
+  const {slots, gKO, feederTeam, getPred, sfLoser, renderBMatch, renderFinalMatch, fmtKO} = ctx;
   const r32m = (id) => { const m = R32.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:slots[m.s1], t2:slots[m.s2], date:m.d, label:m.id}); };
-  const kom  = (arr,id) => { const m = arr.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:gKO(m.f1), t2:gKO(m.f2), date:m.d, label:m.id, waitingOn:m.f1+" & "+m.f2}); };
+  const kom  = (arr,id) => { const m = arr.find(x => x.id === id); return renderBMatch({key:m.id, mid:m.id, t1:feederTeam(m.f1), t2:feederTeam(m.f2), date:m.d, label:m.id, waitingOn:m.f1+" & "+m.f2}); };
 
   const sectionHeader = (label) => eGlobal("div", {
     className: "text-center text-[11px] font-extrabold tracking-wider text-white bg-blue-700 rounded-lg py-1.5 mb-2 mt-4 uppercase"
@@ -1168,7 +1168,7 @@ function MobileBracket({ctx, nowTick}) {
   const qfSorted  = QF.slice().sort((a, b) => (parseRoundDate(a.d) || 0) - (parseRoundDate(b.d) || 0));
   const sfSorted  = SF.slice().sort((a, b) => (parseRoundDate(a.d) || 0) - (parseRoundDate(b.d) || 0));
 
-  const finalT1 = gKO("M101"), finalT2 = gKO("M102");
+  const finalT1 = feederTeam("M101"), finalT2 = feederTeam("M102");
   const champ   = gKO("M104");
   const runner  = (champ && finalT1 && finalT2) ? (champ === finalT1 ? finalT2 : finalT1) : null;
   const third   = gKO("M103");
@@ -1937,25 +1937,39 @@ function App() {
   const sfLoser = (sfId) => {
     const m = SF.find(x => x.id === sfId);
     if (!m) return null;
-    const a = resolveKO(m.f1), b = resolveKO(m.f2);
-    const w = resolveKO(sfId);
+    // The two teams in this SF are the real QF winners (fall back to picks until in).
+    const a = feederTeam(m.f1), b = feederTeam(m.f2);
+    // The SF winner: real result if in, else the player's validated pick.
+    const w = koResultWinner(results[sfId]) || resolveKO(sfId);
     if (!a || !b || !w) return null;
     return w === a ? b : a;
   };
+  // The two TEAMS contesting a match. For R32 these come from the real qualified
+  // slots. For R16+ each side is the ACTUAL winner of its feeder match (from
+  // results), falling back to the player's predicted winner of that feeder only
+  // while the real result isn't in yet — so the bracket shows the real teams that
+  // advanced, and players pick between those, not between their own guesses.
+  const matchTeams = (mid) => {
+    const r32 = R32.find(m => m.id === mid);
+    if (r32) return [slotsRef.current[r32.s1] || null, slotsRef.current[r32.s2] || null];
+    const m = R16.find(x => x.id === mid) || QF.find(x => x.id === mid) || SF.find(x => x.id === mid);
+    if (m) return [feederTeam(m.f1), feederTeam(m.f2)];
+    if (mid === "M104") return [feederTeam("M101"), feederTeam("M102")];
+    if (mid === "M103") return [sfLoser("M101"), sfLoser("M102")];
+    return [null, null];
+  };
+  // Who comes OUT of a feeder match into the next round: the real winner if the
+  // result is in, otherwise the player's (validated) pick as a provisional filler.
+  const feederTeam = (mid) => {
+    const realWinner = koResultWinner(results[mid]);
+    if (realWinner) return realWinner;
+    return resolveKO(mid); // provisional: player's own pick until the real result lands
+  };
   const resolveKO = (mid) => {
     if (koTeams[mid] !== undefined) return koTeams[mid];
-    let t1 = null, t2 = null;
-    const r32 = R32.find(m => m.id === mid);
-    if (r32) { t1 = slotsRef.current[r32.s1]; t2 = slotsRef.current[r32.s2]; }
-    else {
-      const m = R16.find(x => x.id === mid) || QF.find(x => x.id === mid) || SF.find(x => x.id === mid);
-      if (m) { t1 = resolveKO(m.f1); t2 = resolveKO(m.f2); }
-      else if (mid === "M104") { t1 = resolveKO("M101"); t2 = resolveKO("M102"); }
-      else if (mid === "M103") {
-        const l1 = sfLoser("M101"), l2 = sfLoser("M102");
-        t1 = l1; t2 = l2;
-      }
-    }
+    // Guard against the recursion below revisiting this id mid-flight.
+    koTeams[mid] = null;
+    const [t1, t2] = matchTeams(mid);
     const pick = preds[activeId + "-" + mid] || null;
     const valid = (pick && (pick === t1 || pick === t2)) ? pick : null;
     koTeams[mid] = valid;
@@ -2632,7 +2646,7 @@ function App() {
       // module-scope bracket components need. Rebuilding this object every render is fine and
       // normal — only BracketWrap/CentreCol/MobileBracket's own function identity needs to stay
       // stable, which it now does since they're defined once at module scope (see above App()).
-      const bracketCtx = {slots, gKO, getPred, sfLoser, renderBMatch, renderFinalMatch, fmtKO};
+      const bracketCtx = {slots, gKO, feederTeam, getPred, sfLoser, renderBMatch, renderFinalMatch, fmtKO};
       tabContent = e("div", {className: "wc-card rounded-2xl p-6 shadow-2xl"},
         e("h2", {className: "text-2xl font-bold text-blue-900 mb-1"}, "K.O. Stage \u2013 Your Predictions"),
         e("p", {className: "text-gray-500 text-sm mb-4"}, "Official FIFA format: 12 group winners + 12 runners-up + 8 best third-placed teams, now using the real qualified teams from the finished group stage. " +

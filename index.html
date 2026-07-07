@@ -2134,6 +2134,12 @@ function App() {
   // player's own call — never mixed into the box itself. Neutral/gray before the match is
   // decided, green/red once it is. For scoreable rounds (QF/SF/Bronze/Final) it also folds
   // in the scoreline guess, since that's a second, independent point category on the same match.
+  // Formats a per-team scoreline guess for display, e.g. "2-1" or, when the guessed score
+  // is level, "2-2 (win on pens)" — since a knockout winner pick paired with a drawn
+  // scoreline only makes sense as "this goes to penalties, and my pick wins the shootout".
+  // Spelling that out avoids anyone reading "picked Morocco, 2-2" as a contradiction.
+  const fmtGuess = (winGoals, loseGoals) => winGoals + "-" + loseGoals + (winGoals === loseGoals ? " (win on pens)" : "");
+
   const buildPickLabel = (props, opts, validPick, mLocked, winnerPts, scoreable, actualWinner, resParts) => {
     if (opts.length !== 2) {
       const msg = props.waitingOn ? ("Waiting for " + props.waitingOn + " winners") : "Complete all group scores first";
@@ -2146,7 +2152,9 @@ function App() {
     }
     if (!actualWinner) {
       if (validPick) {
-        const guess = (scoreable && v1 !== "" && v2 !== "") ? (" " + (validPick === props.t1 ? v1 + "-" + v2 : v2 + "-" + v1)) : "";
+        const guess = (scoreable && v1 !== "" && v2 !== "")
+          ? (" " + (validPick === props.t1 ? fmtGuess(v1, v2) : fmtGuess(v2, v1)))
+          : "";
         return {el: e("div", {className: "bpick muted"}, "You picked " + validPick + guess), state: ""};
       }
       if (mLocked) return {el: e("div", {className: "bpick muted"}, "Locked \u2014 no pick made"), state: ""};
@@ -2180,7 +2188,7 @@ function App() {
     }
     const vWin = validPick === props.t1 ? v1 : v2;
     const vLose = validPick === props.t1 ? v2 : v1;
-    const guessText = (vWin !== "" && vLose !== "") ? (" " + vWin + "-" + vLose) : "";
+    const guessText = (vWin !== "" && vLose !== "") ? (" " + fmtGuess(vWin, vLose)) : "";
     const totalPts = wPts + scorePts;
     let clarifier = null;
     if (!correct) {

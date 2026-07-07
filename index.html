@@ -1040,7 +1040,9 @@ function BracketLines({wrapRef, centreRef}) {
         // Arrow size — path stops behind the arrowhead tip
         const AH = 9; // arrowhead depth in px — path terminates this far before tip
 
-        // Regular column pairs: cubic bezier, path ends AH px behind arrowhead tip
+        // Regular column pairs: right-angle elbow connector (horizontal, then vertical,
+        // then horizontal) — matches a standard tournament-bracket look rather than a
+        // smooth S-curve. Path ends AH px behind the arrowhead tip.
         const makePairs = (lCol, rCol, dir) => {
           const out = [];
           if (!lCol || !rCol || !lCol.length || !rCol.length) return out;
@@ -1050,7 +1052,7 @@ function BracketLines({wrapRef, centreRef}) {
               const tip = dir==="ltr" ? dst.xL - 4 : dst.xR + 4;
               const x1  = dir==="ltr" ? tip - AH    : tip + AH; // path ends before tip
               const mx  = (x0 + x1) / 2;
-              out.push({d:`M${x0},${src.y} C${mx},${src.y} ${mx},${dst.y} ${x1},${dst.y}`,
+              out.push({d:`M${x0},${src.y} L${mx},${src.y} L${mx},${dst.y} L${x1},${dst.y}`,
                         dir, tip, ay:dst.y});
             });
           });

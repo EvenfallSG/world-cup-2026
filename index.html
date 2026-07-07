@@ -83,26 +83,37 @@ button{transition:all .15s ease;}
 .bwrap{display:flex;gap:40px;align-items:center;width:max-content;position:relative;padding:8px 4px;}
 .bcol{display:flex;flex-direction:column;flex:0 0 182px;width:182px;}
 .bcolh{text-align:center;font-weight:800;font-size:11px;letter-spacing:1.2px;color:#dbeafe;background:rgba(30,64,175,.85);padding:9px 4px;border-radius:8px;margin-bottom:12px;}
-.bmatches{display:flex;flex-direction:column;flex:1;justify-content:space-around;gap:14px;}
-.bmatch{border:1.5px solid #2a4a8f;border-radius:10px;overflow:hidden;background:white;box-shadow:0 3px 10px rgba(3,12,32,.12);transition:box-shadow .18s ease, transform .18s ease;}
-.bmatch:hover{box-shadow:0 8px 22px rgba(3,12,32,.22);transform:translateY(-1px);}
-.bmatch.final-card{border:2.5px solid #f59e0b;box-shadow:0 6px 28px rgba(245,158,11,.28),0 3px 12px rgba(3,12,32,.15);}
-.bmatch-correct{border-color:#16a34a;box-shadow:0 3px 10px rgba(22,163,74,.18);}
-.bmatch-wrong{border-color:#dc2626;box-shadow:0 3px 10px rgba(220,38,38,.18);}
+.bmatches{display:flex;flex-direction:column;flex:1;justify-content:space-around;gap:18px;}
+.bmatchcell{display:flex;flex-direction:column;}
+.bcap{font-size:10.5px;font-weight:700;letter-spacing:.02em;color:#8b93a3;padding:0 2px 5px;text-align:left;}
+.bcap-final{font-size:12px;font-weight:800;color:#92400e;text-align:center;padding-bottom:6px;}
+.bmatch{border:1px solid #dde3ea;border-radius:10px;overflow:hidden;background:white;transition:border-color .15s ease;}
+.bmatch.final-card{border:2px solid #f59e0b;}
+.bmatch.bmatch-correct{border-color:#16a34a;}
+.bmatch.bmatch-wrong{border-color:#dc2626;}
 .bresult{padding:6px 8px;font-size:11px;font-weight:700;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;gap:6px;}
 .bscorerow{display:flex;align-items:center;justify-content:center;gap:5px;padding:7px 8px;border-top:1px solid #e2e8f0;background:#f8fafc;}
 .bscoreinput{width:30px;padding:3px 0;text-align:center;font-size:12px;font-weight:700;border:1.5px solid #cbd5e1;border-radius:5px;color:#1e3a5f;background:white;}
 .bscoreinput:focus{outline:none;border-color:#3b82f6;}
 .bscoreinput:disabled{background:#f1f5f9;color:#94a3b8;border-color:#e2e8f0;}
 .bscoredash{font-size:11px;color:#94a3b8;font-weight:700;}
-.bteam{padding:9px 10px;font-size:12px;font-weight:600;color:#1e3a5f;background:#f0f9ff;border-bottom:1px solid #e2e8f0;}
-.bteam.final-card-team{padding:16px 14px;font-size:14px;font-weight:700;}
-.bteam.won{background:linear-gradient(90deg,#bbf7d0,#6ee7b7);color:#065f46;}
-.bteam.tbd{color:#94a3b8;font-style:italic;}
-.bvs{padding:5px 8px;font-size:10px;text-align:center;color:#64748b;background:white;}
-.bvs.final-card-vs{padding:11px 10px;font-size:12px;font-weight:700;color:#92400e;background:#fffbeb;}
-.bsel{width:100%;padding:6px 8px;font-size:11px;border:none;border-top:1px solid #e2e8f0;background:#fefce8;color:#1e3a5f;font-weight:600;cursor:pointer;}
-.bsel:focus{outline:none;background:#fef08a;}
+.brow{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;font-size:13px;font-weight:500;color:#1e293b;}
+.brow:first-of-type{border-bottom:1px solid #eef1f4;}
+.brow.won{font-weight:700;color:#0f172a;}
+.brow.lost{color:#94a3b8;}
+.brow.lost .brow-score{font-weight:500;color:#94a3b8;}
+.brow.tbd{color:#b6bcc6;font-style:italic;}
+.brow-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.brow-score{font-weight:700;flex-shrink:0;}
+.brow-final{padding:14px 14px;font-size:15px;}
+.bpick{margin-top:6px;font-size:11.5px;line-height:1.45;padding:0 2px;overflow-wrap:break-word;}
+.bpick.muted{color:#8b93a3;}
+.bpick.good{color:#047857;}
+.bpick.bad{color:#b91c1c;}
+.bpick-sub{color:#94a3b8;font-weight:500;}
+.bpts{color:#94a3b8;font-weight:600;}
+.bsel{width:100%;padding:6px 8px;font-size:11px;border:none;border-top:1px solid #eef1f4;background:#f8fafc;color:#1e3a5f;font-weight:600;cursor:pointer;}
+.bsel:focus{outline:none;background:#eef2ff;}
 .bdisabled{padding:6px 8px;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;text-align:center;font-style:italic;}
 .bscroll::-webkit-scrollbar{height:10px;}
 .bscroll::-webkit-scrollbar-track{background:rgba(30,64,175,.08);border-radius:6px;}
@@ -1087,26 +1098,20 @@ function BracketLines({wrapRef, centreRef}) {
 
   // Arrowhead: solid filled triangle, tip at (seg.tip, seg.ay)
   // Path terminates AH px before the tip so the line doesn't poke through
-  const AH = 9;
+  const AH = 8;
+  const CONNECTOR_COLOR = "#c2c9d3";
   const arrowHead = (seg, i) => {
-    const col = seg.dir==="ltr" ? "rgba(99,179,237,0.65)" : "rgba(167,139,250,0.65)";
-    const hw = AH * 0.55; // half-width of arrowhead base
+    const hw = AH * 0.5; // half-width of arrowhead base
     const pts = seg.dir==="ltr"
       ? `${seg.tip},${seg.ay} ${seg.tip-AH},${seg.ay-hw} ${seg.tip-AH},${seg.ay+hw}`
       : `${seg.tip},${seg.ay} ${seg.tip+AH},${seg.ay-hw} ${seg.tip+AH},${seg.ay+hw}`;
-    return eGlobal("polygon",{key:"ah"+i, points:pts, fill:col, stroke:"none"});
+    return eGlobal("polygon",{key:"ah"+i, points:pts, fill:CONNECTOR_COLOR, stroke:"none"});
   };
   return eGlobal("svg",{style:{position:"absolute",top:0,left:0,width:W,height:H,pointerEvents:"none",zIndex:0},viewBox:`0 0 ${W} ${H}`},
-    eGlobal("defs",null,
-      eGlobal("filter",{id:"bglow"},
-        eGlobal("feGaussianBlur",{stdDeviation:"1.0",result:"b"}),
-        eGlobal("feMerge",null,eGlobal("feMergeNode",{in:"b"}),eGlobal("feMergeNode",{in:"SourceGraphic"}))
-      )
-    ),
-    segs.map((seg,i) => eGlobal("g",{key:i,filter:"url(#bglow)"},
+    segs.map((seg,i) => eGlobal("g",{key:i},
       eGlobal("path",{d:seg.d,fill:"none",
-        stroke:seg.dir==="ltr"?"rgba(99,179,237,0.40)":"rgba(167,139,250,0.40)",
-        strokeWidth:"2.2",strokeLinecap:"butt"}),
+        stroke:CONNECTOR_COLOR,
+        strokeWidth:"1.3",strokeLinecap:"butt"}),
       arrowHead(seg,i)
     ))
   );
@@ -2100,105 +2105,152 @@ function App() {
 
   const e = React.createElement;
 
+  // ---- Shared bracket card helpers ----
+  // buildTeamRows: renders the two team rows inside the box. The box is purely about the
+  // real-world result — winner bold, loser muted, per-team goals shown once the match is
+  // decided. Never shows anyone's prediction; that lives entirely in buildPickLabel below.
+  const buildTeamRows = (props, actualWinner, resParts, big) => {
+    let g1 = null, g2 = null;
+    if (actualWinner && resParts && resParts.score && props.t1 && props.t2) {
+      const loser = actualWinner === props.t1 ? props.t2 : (actualWinner === props.t2 ? props.t1 : null);
+      const nums = resParts.score.split("-").map(Number);
+      if (loser && nums.length === 2 && !isNaN(nums[0]) && !isNaN(nums[1])) {
+        const g = {}; g[actualWinner] = nums[0]; g[loser] = nums[1];
+        g1 = g[props.t1]; g2 = g[props.t2];
+      }
+    }
+    const row = (team, goals) => e("div", {
+      className: "brow" + (big ? " brow-final" : "") + (!team ? " tbd" : actualWinner ? (team === actualWinner ? " won" : " lost") : "")
+    },
+      e("span", {className: "brow-name"}, team ? getFlag(team) + "\u00A0" + team : "TBD"),
+      (goals !== null && goals !== undefined) ? e("span", {className: "brow-score"}, goals) : null
+    );
+    return [row(props.t1, g1), row(props.t2, g2)];
+  };
+
+  // buildPickLabel: the text that sits below the box, width-matched to it. Purely about the
+  // player's own call — never mixed into the box itself. Neutral/gray before the match is
+  // decided, green/red once it is. For scoreable rounds (QF/SF/Bronze/Final) it also folds
+  // in the scoreline guess, since that's a second, independent point category on the same match.
+  const buildPickLabel = (props, opts, validPick, mLocked, winnerPts, scoreable, actualWinner, resParts) => {
+    if (opts.length !== 2) {
+      const msg = props.waitingOn ? ("Waiting for " + props.waitingOn + " winners") : "Complete all group scores first";
+      return {el: e("div", {className: "bpick muted"}, msg), state: ""};
+    }
+    let v1 = "", v2 = "";
+    if (scoreable) {
+      v1 = getPred(props.mid + "-SCORE-" + props.t1);
+      v2 = getPred(props.mid + "-SCORE-" + props.t2);
+    }
+    if (!actualWinner) {
+      if (validPick) {
+        const guess = (scoreable && v1 !== "" && v2 !== "") ? (" " + (validPick === props.t1 ? v1 + "-" + v2 : v2 + "-" + v1)) : "";
+        return {el: e("div", {className: "bpick muted"}, "You picked " + validPick + guess), state: ""};
+      }
+      if (mLocked) return {el: e("div", {className: "bpick muted"}, "Locked \u2014 no pick made"), state: ""};
+      if (isRO) return {el: e("div", {className: "bpick muted"}, "No pick yet"), state: ""};
+      return {el: null, state: ""}; // editable, no pick yet — the selector above already invites the action
+    }
+    if (!validPick) {
+      return {el: e("div", {className: "bpick muted"}, "No pick made ", e("span", {className: "bpts"}, "(+0)")), state: ""};
+    }
+    const correct = validPick === actualWinner;
+    const wPts = correct ? winnerPts : 0;
+    if (!scoreable) {
+      return {
+        el: e("div", {className: "bpick " + (correct ? "good" : "bad")},
+          "You picked " + validPick + " ", e("span", {className: "bpts"}, "(+" + wPts + ")")),
+        state: correct ? "correct" : "wrong"
+      };
+    }
+    const loser = actualWinner === props.t1 ? props.t2 : (actualWinner === props.t2 ? props.t1 : null);
+    let scorePts = 0, scoreCorrect = false, actualWinGoals = null, actualLoseGoals = null;
+    if (loser && resParts && resParts.score) {
+      const nums = resParts.score.split("-").map(Number);
+      if (nums.length === 2 && !isNaN(nums[0]) && !isNaN(nums[1])) {
+        const g = {}; g[actualWinner] = nums[0]; g[loser] = nums[1];
+        actualWinGoals = nums[0]; actualLoseGoals = nums[1];
+        if (v1 !== "" && v2 !== "") {
+          const p1 = parseInt(v1, 10), p2 = parseInt(v2, 10);
+          if (!isNaN(p1) && !isNaN(p2) && p1 === g[props.t1] && p2 === g[props.t2]) { scoreCorrect = true; scorePts = SCORE_KO_SCORE; }
+        }
+      }
+    }
+    const vWin = validPick === props.t1 ? v1 : v2;
+    const vLose = validPick === props.t1 ? v2 : v1;
+    const guessText = (vWin !== "" && vLose !== "") ? (" " + vWin + "-" + vLose) : "";
+    const totalPts = wPts + scorePts;
+    let clarifier = null;
+    if (!correct) {
+      clarifier = actualWinner + " won " + (resParts && resParts.score ? resParts.score + (resParts.pens ? " (pens)" : "") : "");
+    } else if (guessText && !scoreCorrect && actualWinGoals !== null) {
+      clarifier = "actual score was " + actualWinGoals + "-" + actualLoseGoals;
+    } else if (guessText && scoreCorrect) {
+      clarifier = "exact score too";
+    }
+    return {
+      el: e("div", {className: "bpick " + (correct ? "good" : "bad")},
+        "You picked " + validPick + guessText + " ",
+        clarifier ? e("span", {className: "bpick-sub"}, clarifier + " ") : null,
+        e("span", {className: "bpts"}, "(+" + totalPts + ")")
+      ),
+      state: correct ? "correct" : "wrong"
+    };
+  };
+
   const renderBMatch = (props) => {
     const pr = getPred(props.mid);
     const opts = [props.t1, props.t2].filter(Boolean);
-    let action;
     const validPick = opts.indexOf(pr) !== -1 ? pr : "";
     const mLocked = isLockedKey(props.mid);
-    if (opts.length === 2 && !isRO && !mLocked) {
-      action = e("select", {value: validPick, onChange: ev => setKO(props.mid, ev.target.value), className: "bsel"},
-        e("option", {value: ""}, props.isF ? "Pick champion" : "Pick winner"),
-        opts.map(t => e("option", {key: t, value: t}, t))
-      );
-    } else if (opts.length === 2 && !isRO && mLocked) {
-      action = e("div", {className: "bdisabled"}, pr ? "\uD83D\uDD12 Locked: " + pr : "\uD83D\uDD12 Locked - no pick");
-    } else if (opts.length === 2 && isRO) {
-      action = e("div", {className: "bdisabled"}, pr ? "Picked: " + pr : "No pick yet");
-    } else {
-      let msg;
-      if (props.waitingOn) {
-        msg = "Pick " + props.waitingOn + " winners first";
-      } else {
-        msg = "Complete all group scores first";
-      }
-      action = e("div", {className: "bdisabled"}, msg);
-    }
+    const resParts = koResultParts(results[props.mid]);
+    const actualWinner = koResultWinner(results[props.mid]);
     // Date: prefer the real confirmed KO_KICKOFF timestamp (R32 only, for now) over the
     // static `d` field passed in via props — the static field has drifted out of sync with
     // the real published times for several matches (e.g. M74's real kickoff is a day later
     // than its `d` field says). R16+ have no real time published yet, so they keep `props.date`.
     const dateLabel = KO_KICKOFF[props.mid] ? fmtKO(KO_KICKOFF[props.mid]) : props.date;
-    // Actual result line: shows once results[mid] exists, colored by whether the viewer's
-    // pick matched the real winner (green = correct, red = wrong, gray = no pick made).
-    const resParts = koResultParts(results[props.mid]);
-    const actualWinner = koResultWinner(results[props.mid]);
-    let resultLine = null;
-    if (actualWinner) {
-      const isCorrect = !!validPick && validPick === actualWinner;
-      const hasPick = !!validPick;
-      const colorStyle = isCorrect
-        ? {background: "#ecfdf5", color: "#047857"}
-        : hasPick
-        ? {background: "#fef2f2", color: "#b91c1c"}
-        : {background: "#f8fafc", color: "#475569"};
-      const scoreText = resParts && resParts.score
-        ? actualWinner + " won " + resParts.score + (resParts.pens ? " (pens)" : "")
-        : actualWinner + " won";
-      const pts = isCorrect ? SCORE_KO : 0;
-      resultLine = e("div", {className: "bresult", style: colorStyle},
-        e("span", null, scoreText),
-        e("span", null, (pts > 0 ? "+" : "") + pts)
+    const capLabel = props.label + " \u00b7 " + (actualWinner ? "Full time" : dateLabel);
+
+    let action = null;
+    if (opts.length === 2 && !isRO && !mLocked && !actualWinner) {
+      action = e("select", {value: validPick, onChange: ev => setKO(props.mid, ev.target.value), className: "bsel"},
+        e("option", {value: ""}, "Pick winner"),
+        opts.map(t => e("option", {key: t, value: t}, t))
       );
     }
 
-    // Scoreline prediction (QF/SF/Bronze/Final only) — two small per-team number inputs,
-    // stored keyed by team name so there's no left/right ambiguity. Shares the same lock
-    // gate as the winner pick (mLocked), and only renders once both teams are known.
-    let scoreRow = null, scoreResultLine = null;
-    if (props.scoreable && opts.length === 2) {
-      const [t1, t2] = [props.t1, props.t2];
-      const v1 = getPred(props.mid + "-SCORE-" + t1);
-      const v2 = getPred(props.mid + "-SCORE-" + t2);
+    // Scoreline prediction (QF/SF/Bronze only here — Final uses renderFinalMatch). Two small
+    // per-team number inputs, stored keyed by team name so there's no left/right ambiguity.
+    // Only shown pre-result — once decided, the combined winner+score readout moves to the
+    // pick label below the box.
+    let scoreRow = null;
+    if (props.scoreable && opts.length === 2 && !actualWinner) {
       const scDisabled = isRO || mLocked;
       scoreRow = e("div", {className: "bscorerow"},
         e("input", {
-          type: "text", inputMode: "numeric", maxLength: 2, value: v1, disabled: scDisabled,
+          type: "text", inputMode: "numeric", maxLength: 2, value: getPred(props.mid + "-SCORE-" + props.t1), disabled: scDisabled,
           placeholder: "-", className: "bscoreinput",
-          onChange: ev => setPred(props.mid + "-SCORE-" + t1, ev.target.value.replace(/\D/g, ""))
+          onChange: ev => setPred(props.mid + "-SCORE-" + props.t1, ev.target.value.replace(/\D/g, ""))
         }),
         e("span", {className: "bscoredash"}, "\u2013"),
         e("input", {
-          type: "text", inputMode: "numeric", maxLength: 2, value: v2, disabled: scDisabled,
+          type: "text", inputMode: "numeric", maxLength: 2, value: getPred(props.mid + "-SCORE-" + props.t2), disabled: scDisabled,
           placeholder: "-", className: "bscoreinput",
-          onChange: ev => setPred(props.mid + "-SCORE-" + t2, ev.target.value.replace(/\D/g, ""))
+          onChange: ev => setPred(props.mid + "-SCORE-" + props.t2, ev.target.value.replace(/\D/g, ""))
         })
       );
-      if (actualWinner && resParts && resParts.score) {
-        const loser = actualWinner === t1 ? t2 : (actualWinner === t2 ? t1 : null);
-        const nums = resParts.score.split("-").map(Number);
-        if (loser && nums.length === 2 && !isNaN(nums[0]) && !isNaN(nums[1]) && v1 !== "" && v2 !== "") {
-          const actualGoals = {}; actualGoals[actualWinner] = nums[0]; actualGoals[loser] = nums[1];
-          const p1 = parseInt(v1, 10), p2 = parseInt(v2, 10);
-          const correct = p1 === actualGoals[t1] && p2 === actualGoals[t2];
-          scoreResultLine = e("div", {className: "bresult", style: correct ? {background: "#ecfdf5", color: "#047857"} : {background: "#fef2f2", color: "#b91c1c"}},
-            e("span", null, "Score guess: " + v1 + "-" + v2),
-            e("span", null, (correct ? "+" + SCORE_KO_SCORE : "0"))
-          );
-        }
-      }
     }
 
-    return e("div", {className: "bmatch" + (actualWinner ? (validPick === actualWinner ? " bmatch-correct" : validPick ? " bmatch-wrong" : "") : ""), key: props.mid},
-      e("div", {className: "bteam" + (validPick === props.t1 && props.t1 ? " won" : !props.t1 ? " tbd" : "")},
-        props.t1 ? e("span", null, getFlag(props.t1) + "\u00A0" + props.t1) : "TBD"),
-      e("div", {className: "bvs"}, props.label + " - " + dateLabel),
-      resultLine,
-      e("div", {className: "bteam" + (validPick === props.t2 && props.t2 ? " won" : !props.t2 ? " tbd" : "")},
-        props.t2 ? e("span", null, getFlag(props.t2) + "\u00A0" + props.t2) : "TBD"),
-      action,
-      scoreRow,
-      scoreResultLine
+    const [row1, row2] = buildTeamRows(props, actualWinner, resParts, false);
+    const pick = buildPickLabel(props, opts, validPick, mLocked, SCORE_KO, !!props.scoreable, actualWinner, resParts);
+
+    return e("div", {className: "bmatchcell", key: props.mid},
+      e("div", {className: "bcap"}, capLabel),
+      e("div", {className: "bmatch" + (pick.state ? " bmatch-" + pick.state : "")},
+        row1, row2, action, scoreRow
+      ),
+      pick.el
     );
   };
 
@@ -2211,84 +2263,43 @@ function App() {
     const opts = [props.t1, props.t2].filter(Boolean);
     const validPick = opts.indexOf(pr) !== -1 ? pr : "";
     const mLocked = isLockedKey(props.mid);
-    let action;
-    if (opts.length === 2 && !isRO && !mLocked)
-      action = e("select", {value:validPick, onChange:ev=>setKO(props.mid,ev.target.value), className:"bsel"},
-        e("option",{value:""},"Pick champion"),
-        opts.map(t=>e("option",{key:t,value:t},t))
-      );
-    else if (opts.length === 2 && !isRO && mLocked)
-      action = e("div",{className:"bdisabled"}, pr ? "\uD83D\uDD12 "+pr : "\uD83D\uDD12 Locked - no pick");
-    else if (opts.length === 2 && isRO)
-      action = e("div",{className:"bdisabled"}, pr ? "Picked: "+pr : "No pick yet");
-    else
-      action = e("div",{className:"bdisabled"}, "Awaiting SF winners");
     const resParts = koResultParts(results[props.mid]);
     const actualWinner = koResultWinner(results[props.mid]);
-    let resultLine = null;
-    if (actualWinner) {
-      const isCorrect = !!validPick && validPick === actualWinner;
-      const hasPick = !!validPick;
-      const colorStyle = isCorrect
-        ? {background: "#ecfdf5", color: "#047857"}
-        : hasPick
-        ? {background: "#fef2f2", color: "#b91c1c"}
-        : {background: "#f8fafc", color: "#475569"};
-      const scoreText = resParts && resParts.score
-        ? actualWinner + " won " + resParts.score + (resParts.pens ? " (pens)" : "")
-        : actualWinner + " won";
-      const pts = isCorrect ? SCORE_QP.QP_WIN : 0;
-      resultLine = e("div", {className: "bresult", style: colorStyle},
-        e("span", null, scoreText),
-        e("span", null, (pts > 0 ? "+" : "") + pts)
+
+    let action = null;
+    if (opts.length === 2 && !isRO && !mLocked && !actualWinner) {
+      action = e("select", {value: validPick, onChange: ev => setKO(props.mid, ev.target.value), className: "bsel"},
+        e("option", {value: ""}, "Pick champion"),
+        opts.map(t => e("option", {key: t, value: t}, t))
       );
     }
 
-    // Scoreline prediction for the Final (M104) — same per-team pattern as renderBMatch.
-    let scoreRow = null, scoreResultLine = null;
-    if (opts.length === 2) {
-      const [t1, t2] = [props.t1, props.t2];
-      const v1 = getPred(props.mid + "-SCORE-" + t1);
-      const v2 = getPred(props.mid + "-SCORE-" + t2);
+    let scoreRow = null;
+    if (opts.length === 2 && !actualWinner) {
       const scDisabled = isRO || mLocked;
       scoreRow = e("div", {className: "bscorerow"},
         e("input", {
-          type: "text", inputMode: "numeric", maxLength: 2, value: v1, disabled: scDisabled,
+          type: "text", inputMode: "numeric", maxLength: 2, value: getPred(props.mid + "-SCORE-" + props.t1), disabled: scDisabled,
           placeholder: "-", className: "bscoreinput",
-          onChange: ev => setPred(props.mid + "-SCORE-" + t1, ev.target.value.replace(/\D/g, ""))
+          onChange: ev => setPred(props.mid + "-SCORE-" + props.t1, ev.target.value.replace(/\D/g, ""))
         }),
         e("span", {className: "bscoredash"}, "\u2013"),
         e("input", {
-          type: "text", inputMode: "numeric", maxLength: 2, value: v2, disabled: scDisabled,
+          type: "text", inputMode: "numeric", maxLength: 2, value: getPred(props.mid + "-SCORE-" + props.t2), disabled: scDisabled,
           placeholder: "-", className: "bscoreinput",
-          onChange: ev => setPred(props.mid + "-SCORE-" + t2, ev.target.value.replace(/\D/g, ""))
+          onChange: ev => setPred(props.mid + "-SCORE-" + props.t2, ev.target.value.replace(/\D/g, ""))
         })
       );
-      if (actualWinner && resParts && resParts.score) {
-        const loser = actualWinner === t1 ? t2 : (actualWinner === t2 ? t1 : null);
-        const nums = resParts.score.split("-").map(Number);
-        if (loser && nums.length === 2 && !isNaN(nums[0]) && !isNaN(nums[1]) && v1 !== "" && v2 !== "") {
-          const actualGoals = {}; actualGoals[actualWinner] = nums[0]; actualGoals[loser] = nums[1];
-          const p1 = parseInt(v1, 10), p2 = parseInt(v2, 10);
-          const correct = p1 === actualGoals[t1] && p2 === actualGoals[t2];
-          scoreResultLine = e("div", {className: "bresult", style: correct ? {background: "#ecfdf5", color: "#047857"} : {background: "#fef2f2", color: "#b91c1c"}},
-            e("span", null, "Score guess: " + v1 + "-" + v2),
-            e("span", null, (correct ? "+" + SCORE_KO_SCORE : "0"))
-          );
-        }
-      }
     }
 
-    return e("div", {className:"bmatch final-card"},
-      e("div", {className:"bteam final-card-team"+(validPick===props.t1&&props.t1?" won":!props.t1?" tbd":"")},
-        props.t1 ? getFlag(props.t1)+"\u00A0"+props.t1 : "TBD"),
-      e("div", {className:"bvs final-card-vs"}, "\uD83C\uDFC6 FINAL \u00B7 Jul 19"),
-      resultLine,
-      e("div", {className:"bteam final-card-team"+(validPick===props.t2&&props.t2?" won":!props.t2?" tbd":"")},
-        props.t2 ? getFlag(props.t2)+"\u00A0"+props.t2 : "TBD"),
-      action,
-      scoreRow,
-      scoreResultLine
+    const [row1, row2] = buildTeamRows(props, actualWinner, resParts, true);
+    const pick = buildPickLabel(props, opts, validPick, mLocked, SCORE_QP.QP_WIN, true, actualWinner, resParts);
+
+    return e("div", {className: "bmatchcell"},
+      e("div", {className: "bmatch final-card" + (pick.state ? " bmatch-" + pick.state : "")},
+        row1, row2, action, scoreRow
+      ),
+      pick.el
     );
   };
 

@@ -309,7 +309,19 @@ async function fetchAndApplySync() {
   // liveResults starts as a copy of the DB's current results and accumulates any
   // new writes from THIS run, so later rounds (which depend on earlier winners) can
   // resolve correctly even if multiple rounds advance within a single sync run.
-  const liveResults = Object.assign({}, results);
+  //
+  // BUGFIX: `results` stores knockout entries as "Winner|score[|pens]" strings, but
+  // resolveKOTeams() needs bare winner names (it compares liveResults[feederId]
+  // directly against team names from the live feed). Copying `results` verbatim into
+  // liveResults meant every R16+ match compared against a garbage string like
+  // "Paraguay|1-1|pens" instead of "Paraguay" — which never equals a real team name,
+  // so no R16+ match could ever resolve its two teams, and nothing past R32 ever got
+  // written. Un-wrapping each entry to its bare winner name here fixes that.
+  const liveResults = {};
+  Object.keys(results).forEach((k) => {
+    const raw = results[k];
+    liveResults[k] = (typeof raw === "string" && raw.includes("|")) ? raw.split("|")[0] : raw;
+  });
   const slots = getRealSlots(results); // group-stage standings don't change once frozen
 
   const gmLookup = {};

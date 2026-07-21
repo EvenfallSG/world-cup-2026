@@ -129,6 +129,14 @@ button{transition:all .15s ease;}
 .ticker-track{display:inline-flex;align-items:center;gap:2.5rem;white-space:nowrap;will-change:transform;}
 .ticker-track.scrolling{animation:tickerScroll linear infinite;}
 .ticker-viewport{overflow:hidden;white-space:nowrap;width:100%;}
+/* ---- Final celebration (tournament complete) ---- */
+.wc-confetti{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:5;}
+.wc-confetti span{position:absolute;top:-24px;display:block;border-radius:2px;opacity:0;animation:confettiFall linear infinite;}
+@keyframes confettiFall{0%{transform:translateY(-24px) rotate(0deg);opacity:0;}6%{opacity:1;}100%{transform:translateY(105vh) rotate(660deg);opacity:.85;}}
+@keyframes trophyDrop{0%{transform:translateY(-90px) scale(.4);opacity:0;}60%{transform:translateY(10px) scale(1.1);opacity:1;}80%{transform:translateY(-5px) scale(.97);}100%{transform:translateY(0) scale(1);opacity:1;}}
+@keyframes champGlow{0%,100%{text-shadow:0 0 16px rgba(251,191,36,.4);}50%{text-shadow:0 0 44px rgba(251,191,36,.95);}}
+@keyframes podiumRise{from{transform:scaleY(0);}to{transform:scaleY(1);}}
+.wc-podium-col{transform-origin:bottom;animation:podiumRise .9s cubic-bezier(.2,.8,.3,1.1) both;}
 /* ---- Leaderboard (Stadium Night) ---- */
 .lb-board{display:flex;flex-direction:column;gap:8px;}
 .lb-row{display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:15px;border:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.035);transition:background .25s ease,border-color .25s ease,transform .2s ease;}
@@ -221,6 +229,20 @@ function koResultParts(raw) {
   if (!raw || !raw.includes("|")) return null;
   const parts = raw.split("|");
   return { winner: parts[0], score: parts[1] || null, pens: parts[2] === "pens" };
+}
+
+// Awards (Golden Boot / MVP) are free-text picks, so matching must tolerate accents,
+// case, and "Kylian Mbappé (France)"-style embellishment. Both sides are normalised to
+// bare ascii words; a pick counts if it equals the actual answer or contains it as a
+// whole word — so "Mbappe", "mbappe", "Kylian Mbappé" and "Kylian Mbappé (France)" all
+// match an actual of "Mbappe", while "Rodrigo" still would NOT match "Rodri" (whole-word
+// containment, not substring). Podium picks (team names) stay exact-match: those come
+// from dropdowns of canonical names, so fuzziness there could only introduce bugs.
+function awardMatch(pred, actual) {
+  const norm = s => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim();
+  const p = norm(pred), a = norm(actual);
+  if (!p || !a) return false;
+  return p === a || (" " + p + " ").indexOf(" " + a + " ") !== -1;
 }
 
 // Pure resolver for "who actually played in this KO match" — used to score scoreline
@@ -332,9 +354,14 @@ function calcPlayerScore(pid, preds, results, players) {
       else pred = preds[pid + "-" + key]; // QP_RUN/4TH: full bracket players can also fill these
     }
     if (!pred || typeof pred !== "string") return;
-    if (pred.trim().toLowerCase() === actual.trim().toLowerCase()) {
+    // Awards are free-text (accent/variant-tolerant match); podium picks stay exact.
+    const isAward = key === "GOLDEN_BOOT" || key === "MVP";
+    const hit = isAward
+      ? awardMatch(pred, actual)
+      : pred.trim().toLowerCase() === actual.trim().toLowerCase();
+    if (hit) {
       koTotal += SCORE_QP[key];
-      if (key === "GOLDEN_BOOT" || key === "MVP") breakdown.awardPoints += SCORE_QP[key];
+      if (isAward) breakdown.awardPoints += SCORE_QP[key];
       else breakdown.qpPoints += SCORE_QP[key];
     }
   });
@@ -941,6 +968,29 @@ function TickerText({icon, text, tickerKey}) {
       scrolling && content // duplicate only when actually scrolling, for a seamless wrap
     )
   );
+}
+
+// Rolls a number up from 0 once on mount (ease-out cubic) — used by the final-celebration
+// screen so the champion's points count up dramatically instead of just appearing. Stable
+// module-scope component (same reasoning as the bracket components below): defining it
+// inline in the leaderboard render would remount it — and restart the roll-up — on every
+// 8s poll.
+function CountUp({to, duration}) {
+  const e = React.createElement;
+  const [val, setVal] = React.useState(0);
+  React.useEffect(() => {
+    const dur = duration || 1800;
+    let raf;
+    const t0 = performance.now();
+    const step = t => {
+      const k = Math.min(1, (t - t0) / dur);
+      setVal(Math.round(to * (1 - Math.pow(1 - k, 3))));
+      if (k < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [to]);
+  return e("span", null, String(val));
 }
 
 // ---- BRACKET DISPLAY COMPONENTS (module scope) ----
@@ -2394,6 +2444,64 @@ function App() {
         : e("div", {className: "lb-board"}, list.map((p, i) => row(p, i, isQuickBoard)))
     );
 
+    // ---- FINAL CELEBRATION (activates automatically once the Final's result exists) ----
+    const finished = !!results.M104;
+    const worldChamp = finished ? koResultWinner(results.M104) : null;
+    const finalParts = finished ? koResultParts(results.M104) : null;
+    // Pool champion = highest KO total across BOTH boards (Full Bracket + Quick Picks) \u2014
+    // the two boards stay separate below, but there's only one name on the trophy.
+    const allRanked = [...fullPlayers, ...quickPlayers].sort((a, b) => b.koTotal - a.koTotal);
+    const poolChamp = (finished && allRanked.length) ? allRanked[0] : null;
+    const qpChamp = (finished && quickPlayers.length) ? quickPlayers[0] : null;
+
+    const chip = (txt, key) => e("span", {key, className: "lb-chip",
+      style: {background: "rgba(255,255,255,.10)", color: "#fff", border: "1px solid rgba(255,255,255,.22)", padding: "5px 12px"}}, txt);
+    // Silver / gold / bronze display order (gold centre, tallest column).
+    const podiumOrder = [allRanked[1], allRanked[0], allRanked[2]];
+    const podiumStyle = [
+      {h: 62, col: "#e5e7eb", bg: "rgba(255,255,255,.14)", bd: "rgba(255,255,255,.28)", medal: "\ud83e\udd48", d: ".25s"},
+      {h: 92, col: "#fbbf24", bg: "rgba(251,191,36,.25)", bd: "rgba(251,191,36,.6)", medal: "\ud83e\udd47", d: ".45s"},
+      {h: 46, col: "#fdba74", bg: "rgba(253,186,116,.2)", bd: "rgba(253,186,116,.45)", medal: "\ud83e\udd49", d: ".05s"}
+    ];
+    const ceremony = poolChamp && e("div", {className: "text-center mb-8 relative"},
+      e("div", {className: "wc-confetti", "aria-hidden": true},
+        // Deterministic pseudo-random placement (index-derived, not Math.random) so the
+        // confetti field doesn't reshuffle on every 8s-poll re-render.
+        Array.from({length: 46}).map((_, i) => e("span", {key: i, style: {
+          left: ((i * 137 + 29) % 100) + "%",
+          background: ["#fbbf24", "#f472b6", "#7ef0c0", "#9fd0ff", "#fca5a5"][i % 5],
+          width: (i % 3 === 0 ? 10 : 7) + "px",
+          height: (i % 4 === 0 ? 14 : 8) + "px",
+          animationDelay: (((i * 53) % 70) / 10) + "s",
+          animationDuration: (6 + ((i * 29) % 50) / 10) + "s"
+        }}))
+      ),
+      e("div", {style: {fontSize: 64, lineHeight: 1, animation: "trophyDrop 1.1s cubic-bezier(.2,.8,.3,1.2) both"}}, "\ud83c\udfc6"),
+      e("h2", {className: "wc-title wc-d-white", style: {fontSize: "clamp(26px,6vw,52px)", margin: "10px 0 0", letterSpacing: "3px"}}, "CONGRATULATIONS"),
+      e("div", {className: "wc-title", style: {fontSize: "clamp(40px,9vw,84px)", color: "#fbbf24", lineHeight: 1.05, animation: "champGlow 2.4s ease-in-out infinite"}}, poolChamp.name.toUpperCase()),
+      e("div", {className: "wc-d-dim text-sm font-bold", style: {marginTop: 6}},
+        "Champion of the pool \u00b7 ",
+        e("span", {style: {color: "#fbbf24", fontWeight: 800}}, e(CountUp, {to: poolChamp.koTotal})),
+        " knockout points"),
+      e("div", {className: "flex items-end justify-center gap-2.5 mt-6"},
+        podiumOrder.map((p, i) => p && e("div", {key: p.id, className: "text-center", style: {width: i === 1 ? 130 : 116}},
+          e("div", {style: {color: podiumStyle[i].col, fontSize: 13, fontWeight: 700, marginBottom: 4}}, podiumStyle[i].medal + " " + p.name),
+          e("div", {className: "wc-podium-col", style: {height: podiumStyle[i].h, background: podiumStyle[i].bg,
+            border: "1px solid " + podiumStyle[i].bd, borderRadius: "10px 10px 0 0",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            color: podiumStyle[i].col, fontWeight: 800, fontSize: i === 1 ? 20 : 15,
+            animationDelay: podiumStyle[i].d}}, p.koTotal)
+        ))
+      ),
+      e("div", {className: "flex flex-wrap gap-2 justify-center mt-5 text-[11px] font-bold"},
+        chip((getFlag(worldChamp) ? getFlag(worldChamp) + " " : "") + worldChamp + " \u2014 World Champions" +
+          (finalParts && finalParts.score ? " (" + finalParts.score + (finalParts.pens ? " pens" : " aet") + ")" : ""), "wc"),
+        results.GOLDEN_BOOT && chip("\u26bd Golden Boot: " + results.GOLDEN_BOOT, "gb"),
+        results.MVP && chip("\u2b50 MVP: " + results.MVP, "mvp"),
+        qpChamp && chip("\u26a1 Quick Picks winner: " + qpChamp.name, "qp")
+      )
+    );
+
     return e("div", {className: "min-h-screen wc-bg p-5 md:p-10"},
       e("div", {className: "max-w-3xl mx-auto"},
         e("div", {className: "flex items-center justify-between mb-6 gap-3"},
@@ -2401,11 +2509,15 @@ function App() {
             className: "px-4 py-2 wc-d-card rounded-xl wc-d-white text-sm font-bold border border-white/15 hover:border-white/30 transition flex-shrink-0"
           }, "\u2190 Back"),
           e("div", {className: "text-center flex-1 min-w-0"},
-            e("h1", {className: "wc-title text-4xl md:text-6xl wc-d-white", style: {marginBottom: 4}}, "LEADERBOARD"),
-            e("span", {className: "wc-d-eyebrow"}, e("span", {className: "dot"}), "Live \u00b7 updates every 8s")
+            e("h1", {className: "wc-title text-4xl md:text-6xl wc-d-white", style: {marginBottom: 4}}, finished ? "FINAL STANDINGS" : "LEADERBOARD"),
+            finished
+              ? e("span", {className: "wc-d-eyebrow"}, "World Cup 2026 \u00b7 Tournament complete")
+              : e("span", {className: "wc-d-eyebrow"}, e("span", {className: "dot"}), "Live \u00b7 updates every 8s")
           ),
           e("div", {className: "w-16 flex-shrink-0"})
         ),
+
+        ceremony,
 
         fact && e("div", {className: "lb-facts mb-6"},
           e("span", {key: "i" + lbFactIdx, className: "ic animate-[tickerFade_0.4s_ease]"}, fact.icon),
